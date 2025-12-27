@@ -34,6 +34,10 @@
           <v-icon size="small" class="mr-1">mdi-chart-areaspline</v-icon>
           Token
         </v-btn>
+        <v-btn value="cache" size="x-small">
+          <v-icon size="small" class="mr-1">mdi-database</v-icon>
+          Cache
+        </v-btn>
       </v-btn-toggle>
     </div>
 
@@ -50,12 +54,12 @@
         </div>
       </div>
       <div class="summary-card">
-        <div class="summary-label">输入 Token</div>
-        <div class="summary-value">{{ formatNumber(summary.totalInputTokens) }}</div>
+        <div class="summary-label">{{ selectedView === 'cache' ? 'Cache 创建' : '输入 Token' }}</div>
+        <div class="summary-value">{{ formatNumber(selectedView === 'cache' ? summary.totalCacheCreationTokens : summary.totalInputTokens) }}</div>
       </div>
       <div class="summary-card">
-        <div class="summary-label">输出 Token</div>
-        <div class="summary-value">{{ formatNumber(summary.totalOutputTokens) }}</div>
+        <div class="summary-label">{{ selectedView === 'cache' ? 'Cache 读取' : '输出 Token' }}</div>
+        <div class="summary-value">{{ formatNumber(selectedView === 'cache' ? summary.totalCacheReadTokens : summary.totalOutputTokens) }}</div>
       </div>
     </div>
 
@@ -65,8 +69,14 @@
       <span :class="{ 'text-success': summary.avgSuccessRate >= 95, 'text-warning': summary.avgSuccessRate >= 80 && summary.avgSuccessRate < 95, 'text-error': summary.avgSuccessRate < 80 }">
         <strong>{{ summary.avgSuccessRate.toFixed(1) }}%</strong> 成功
       </span>
-      <span><strong>{{ formatNumber(summary.totalInputTokens) }}</strong> 输入</span>
-      <span><strong>{{ formatNumber(summary.totalOutputTokens) }}</strong> 输出</span>
+      <template v-if="selectedView === 'cache'">
+        <span><strong>{{ formatNumber(summary.totalCacheCreationTokens) }}</strong> 创建</span>
+        <span><strong>{{ formatNumber(summary.totalCacheReadTokens) }}</strong> 读取</span>
+      </template>
+      <template v-else>
+        <span><strong>{{ formatNumber(summary.totalInputTokens) }}</strong> 输入</span>
+        <span><strong>{{ formatNumber(summary.totalOutputTokens) }}</strong> 输出</span>
+      </template>
     </div>
 
     <!-- Loading state -->
@@ -111,7 +121,7 @@ const props = withDefaults(defineProps<{
 })
 
 // Types
-type ViewMode = 'traffic' | 'tokens'
+type ViewMode = 'traffic' | 'tokens' | 'cache'
 type Duration = '1h' | '6h' | '24h' | 'today'
 
 // LocalStorage keys for preferences (per apiType)
@@ -122,7 +132,7 @@ const loadSavedPreferences = (apiType: string) => {
   const savedView = localStorage.getItem(getStorageKey(apiType, 'viewMode')) as ViewMode | null
   const savedDuration = localStorage.getItem(getStorageKey(apiType, 'duration')) as Duration | null
   return {
-    view: savedView && ['traffic', 'tokens'].includes(savedView) ? savedView : 'traffic',
+    view: savedView && ['traffic', 'tokens', 'cache'].includes(savedView) ? savedView : 'traffic',
     duration: savedDuration && ['1h', '6h', '24h', 'today'].includes(savedDuration) ? savedDuration : '6h'
   }
 }
@@ -193,6 +203,10 @@ const chartColors = {
   tokens: {
     input: '#8b5cf6',      // Purple for input
     output: '#f97316'      // Orange for output
+  },
+  cache: {
+    creation: '#06b6d4',   // Cyan for cache creation
+    read: '#22c55e'        // Green for cache read
   }
 }
 
@@ -225,7 +239,9 @@ const chartOptions = computed(() => {
     },
     colors: mode === 'traffic'
       ? [chartColors.traffic.primary, chartColors.traffic.success]
-      : [chartColors.tokens.input, chartColors.tokens.output],
+      : mode === 'tokens'
+        ? [chartColors.tokens.input, chartColors.tokens.output]
+        : [chartColors.cache.creation, chartColors.cache.read],
     fill: {
       type: 'gradient',
       gradient: {
@@ -241,7 +257,7 @@ const chartOptions = computed(() => {
     stroke: {
       curve: 'smooth',
       width: 2,
-      dashArray: mode === 'tokens' ? [0, 5] : [0, 0]
+      dashArray: mode === 'tokens' || mode === 'cache' ? [0, 5] : [0, 0]
     },
     grid: {
       borderColor: isDark.value ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
@@ -257,31 +273,33 @@ const chartOptions = computed(() => {
       axisBorder: { show: false },
       axisTicks: { show: false }
     },
-    yaxis: mode === 'tokens' ? [
-      {
-        seriesName: '输入 Token',
-        labels: {
-          formatter: (val: number) => formatNumber(val),
-          style: { fontSize: '11px' }
+    yaxis: mode === 'tokens' || mode === 'cache'
+      ? [
+          {
+            seriesName: mode === 'tokens' ? '输入 Token' : 'Cache 创建',
+            labels: {
+              formatter: (val: number) => formatNumber(val),
+              style: { fontSize: '11px' }
+            },
+            min: 0
+          },
+          {
+            seriesName: mode === 'tokens' ? '输出 Token' : 'Cache 读取',
+            opposite: true,
+            labels: {
+              formatter: (val: number) => formatNumber(val),
+              style: { fontSize: '11px' }
+            },
+            min: 0
+          }
+        ]
+      : {
+          labels: {
+            formatter: (val: number) => Math.round(val).toString(),
+            style: { fontSize: '11px' }
+          },
+          min: 0
         },
-        min: 0
-      },
-      {
-        seriesName: '输出 Token',
-        opposite: true,
-        labels: {
-          formatter: (val: number) => formatNumber(val),
-          style: { fontSize: '11px' }
-        },
-        min: 0
-      }
-    ] : {
-      labels: {
-        formatter: (val: number) => Math.round(val).toString(),
-        style: { fontSize: '11px' }
-      },
-      min: 0
-    },
     tooltip: {
       x: {
         format: 'MM-dd HH:mm'
@@ -326,7 +344,7 @@ const chartSeries = computed(() => {
         }))
       }
     ]
-  } else {
+  } else if (mode === 'tokens') {
     return [
       {
         name: '输入 Token',
@@ -340,6 +358,23 @@ const chartSeries = computed(() => {
         data: dataPoints.map(dp => ({
           x: new Date(dp.timestamp).getTime(),
           y: dp.outputTokens
+        }))
+      }
+    ]
+  } else {
+    return [
+      {
+        name: 'Cache 创建',
+        data: dataPoints.map(dp => ({
+          x: new Date(dp.timestamp).getTime(),
+          y: dp.cacheCreationTokens
+        }))
+      },
+      {
+        name: 'Cache 读取',
+        data: dataPoints.map(dp => ({
+          x: new Date(dp.timestamp).getTime(),
+          y: dp.cacheReadTokens
         }))
       }
     ]

@@ -36,7 +36,7 @@
         </v-btn>
         <v-btn value="cache" size="x-small">
           <v-icon size="small" class="mr-1">mdi-database</v-icon>
-          缓存 R/W
+          Cache
         </v-btn>
       </v-btn-toggle>
     </div>
@@ -268,7 +268,7 @@ const allDataPoints = computed(() => {
 const chartOptions = computed(() => {
   const mode = selectedView.value
 
-  // Token/Cache 模式使用双 Y 轴（左侧 Input/Read，右侧 Output/Write）
+  // Token/Cache 模式使用双 Y 轴（左侧 Input/Read，右侧 Output/Create）
   // 解决数量级差异大（如 Input 几十K，Output 几百）导致小值不可见的问题
   let yaxisConfig: any
   if (mode === 'tokens' || mode === 'cache') {
@@ -291,7 +291,7 @@ const chartOptions = computed(() => {
       // Output/Write - 右侧 Y 轴（只第一个显示标签）
       yaxisConfig.push({
         seriesName: historyData.value?.keys?.[i]?.keyMask
-          ? `${historyData.value.keys[i].keyMask} ${mode === 'tokens' ? 'Output' : 'Cache Write'}`
+          ? `${historyData.value.keys[i].keyMask} ${mode === 'tokens' ? 'Output' : 'Cache Create'}`
           : undefined,
         opposite: true,
         show: i === 0,
@@ -403,7 +403,7 @@ const buildChartSeries = (data: ChannelKeyMetricsHistoryResponse | null) => {
     } else {
       // 双向模式：每个 key 创建两个 series（Input/Output 或 Read/Creation）
       const inLabel = mode === 'tokens' ? 'Input' : 'Cache Read'
-      const outLabel = mode === 'tokens' ? 'Output' : 'Cache Write'
+      const outLabel = mode === 'tokens' ? 'Output' : 'Cache Create'
 
       // 正向（Input/Read）
       result.push({

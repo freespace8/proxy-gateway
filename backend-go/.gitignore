@@ -5,7 +5,10 @@ claude-proxy-*
 claude-proxy
 
 # 忽略前端资源（会在构建时复制）
-frontend/
+frontend/*
+!frontend/dist/
+frontend/dist/*
+!frontend/dist/.keep
 
 # 忽略配置文件
 .env
@@ -24,7 +27,6 @@ Thumbs.db
 *.swp
 *.swo
 *~
-go.sum
 tmp/
 
 !docs/

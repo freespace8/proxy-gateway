@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -69,6 +70,8 @@ func main() {
 
 	// 初始化指标持久化存储（可选）
 	var metricsStore *metrics.SQLiteStore
+	var metricsAggCancel context.CancelFunc
+	var metricsAggWg sync.WaitGroup
 	if envCfg.MetricsPersistenceEnabled {
 		var err error
 		metricsStore, err = metrics.NewSQLiteStore(&metrics.SQLiteStoreConfig{
@@ -81,6 +84,24 @@ func main() {
 		}
 	} else {
 		log.Printf("[Metrics-Init] 指标持久化已禁用，使用纯内存模式")
+	}
+
+	// 指标每日预聚合（daily_stats）：启动回填 + 每日 2:00 聚合前一日
+	if metricsStore != nil {
+		aggCtx, cancel := context.WithCancel(context.Background())
+		metricsAggCancel = cancel
+
+		metricsAggWg.Add(1)
+		go func() {
+			defer metricsAggWg.Done()
+			backfillDailyStats(aggCtx, metricsStore, envCfg.MetricsRetentionDays)
+		}()
+
+		metricsAggWg.Add(1)
+		go func() {
+			defer metricsAggWg.Done()
+			runDailyStatsScheduler(aggCtx, metricsStore)
+		}()
 	}
 
 	// 初始化多渠道调度器（Messages 和 Responses 使用独立的指标管理器）
@@ -262,6 +283,10 @@ func main() {
 
 		// 关闭指标持久化存储
 		if metricsStore != nil {
+			if metricsAggCancel != nil {
+				metricsAggCancel()
+				metricsAggWg.Wait()
+			}
 			if err := metricsStore.Close(); err != nil {
 				log.Printf("[Metrics-Shutdown] 警告: 关闭指标存储时发生错误: %v", err)
 			} else {
@@ -284,4 +309,78 @@ func main() {
 	case <-time.After(15 * time.Second):
 		log.Println("[Server-Shutdown] 警告: 等待关闭超时")
 	}
+}
+
+func backfillDailyStats(ctx context.Context, store *metrics.SQLiteStore, retentionDays int) {
+	if store == nil {
+		return
+	}
+	if retentionDays <= 0 {
+		return
+	}
+
+	now := time.Now()
+	loc := now.Location()
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+
+	for i := retentionDays; i >= 1; i-- {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		day := todayStart.AddDate(0, 0, -i)
+		if err := store.AggregateDailyStats(day); err != nil {
+			log.Printf("[Metrics-Aggregate] 警告: daily_stats 回填失败 (%s): %v", day.Format("2006-01-02"), err)
+		}
+	}
+
+	log.Printf("[Metrics-Aggregate] daily_stats 回填完成（最近 %d 天）", retentionDays)
+}
+
+func runDailyStatsScheduler(ctx context.Context, store *metrics.SQLiteStore) {
+	if store == nil {
+		return
+	}
+
+	for {
+		now := time.Now()
+		next := nextLocalTime(now, 2, 0)
+		timer := time.NewTimer(time.Until(next))
+
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+
+		// 聚合“昨天”（完整自然日）
+		runAt := time.Now()
+		loc := runAt.Location()
+		todayStart := time.Date(runAt.Year(), runAt.Month(), runAt.Day(), 0, 0, 0, 0, loc)
+		yesterdayStart := todayStart.AddDate(0, 0, -1)
+
+		// 聚合前先尽力刷新落盘，避免遗漏昨日尾部缓冲数据
+		store.FlushNow()
+		if err := store.AggregateDailyStats(yesterdayStart); err != nil {
+			log.Printf("[Metrics-Aggregate] 警告: daily_stats 聚合失败 (%s): %v", yesterdayStart.Format("2006-01-02"), err)
+			continue
+		}
+		log.Printf("[Metrics-Aggregate] daily_stats 聚合完成 (%s)", yesterdayStart.Format("2006-01-02"))
+	}
+}
+
+func nextLocalTime(now time.Time, hour, minute int) time.Time {
+	loc := now.Location()
+	if loc == nil {
+		loc = time.Local
+	}
+
+	target := time.Date(now.Year(), now.Month(), now.Day(), hour, minute, 0, 0, loc)
+	if !now.Before(target) {
+		target = target.AddDate(0, 0, 1)
+	}
+	return target
 }

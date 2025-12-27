@@ -130,10 +130,78 @@ func initSchema(db *sql.DB) error {
 		-- 索引：按 metrics_key 查询
 		CREATE INDEX IF NOT EXISTS idx_records_metrics_key
 			ON request_records(metrics_key);
+
+		-- 每日预聚合统计表（用于周/月查询加速）
+		CREATE TABLE IF NOT EXISTS daily_stats (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			date TEXT NOT NULL,                    -- YYYY-MM-DD (本地日历日)
+			api_type TEXT NOT NULL,                -- messages/responses
+			metrics_key TEXT NOT NULL,             -- hash(baseURL + apiKey)
+			base_url TEXT NOT NULL,
+			key_mask TEXT NOT NULL,
+			total_requests INTEGER DEFAULT 0,
+			success_count INTEGER DEFAULT 0,
+			failure_count INTEGER DEFAULT 0,
+			input_tokens INTEGER DEFAULT 0,
+			output_tokens INTEGER DEFAULT 0,
+			cache_creation_tokens INTEGER DEFAULT 0,
+			cache_read_tokens INTEGER DEFAULT 0,
+			UNIQUE(date, api_type, metrics_key)
+		);
+
+		CREATE INDEX IF NOT EXISTS idx_daily_stats_date_api
+			ON daily_stats(date, api_type);
 	`
 
 	_, err := db.Exec(schema)
 	return err
+}
+
+// AggregateDailyStats 聚合指定日期（本地日历日）的请求记录到 daily_stats（幂等，可重复执行）
+// 注意：仅聚合完整自然日（建议用于 yesterday / 历史日），不要用于正在写入的“今天”。
+func (s *SQLiteStore) AggregateDailyStats(day time.Time) error {
+	loc := day.Location()
+	if loc == nil {
+		loc = time.Local
+	}
+
+	start := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, loc)
+	end := start.AddDate(0, 0, 1)
+	dateStr := start.Format("2006-01-02")
+
+	_, err := s.db.Exec(`
+		INSERT INTO daily_stats (
+			date, api_type, metrics_key, base_url, key_mask,
+			total_requests, success_count, failure_count,
+			input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens
+		)
+		SELECT
+			?, api_type, metrics_key, base_url, key_mask,
+			COUNT(*) AS total_requests,
+			COALESCE(SUM(success), 0) AS success_count,
+			COALESCE(SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END), 0) AS failure_count,
+			COALESCE(SUM(input_tokens), 0) AS input_tokens,
+			COALESCE(SUM(output_tokens), 0) AS output_tokens,
+			COALESCE(SUM(cache_creation_tokens), 0) AS cache_creation_tokens,
+			COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens
+		FROM request_records
+		WHERE timestamp >= ? AND timestamp < ?
+		GROUP BY api_type, metrics_key, base_url, key_mask
+		ON CONFLICT(date, api_type, metrics_key) DO UPDATE SET
+			base_url = excluded.base_url,
+			key_mask = excluded.key_mask,
+			total_requests = excluded.total_requests,
+			success_count = excluded.success_count,
+			failure_count = excluded.failure_count,
+			input_tokens = excluded.input_tokens,
+			output_tokens = excluded.output_tokens,
+			cache_creation_tokens = excluded.cache_creation_tokens,
+			cache_read_tokens = excluded.cache_read_tokens
+	`, dateStr, start.Unix(), end.Unix())
+	if err != nil {
+		return fmt.Errorf("聚合 daily_stats 失败 (%s): %w", dateStr, err)
+	}
+	return nil
 }
 
 // AddRecord 添加记录到写入缓冲区（非阻塞）
@@ -154,6 +222,12 @@ func (s *SQLiteStore) AddRecord(record PersistentRecord) {
 			s.flush()
 		}()
 	}
+}
+
+// FlushNow 立即将当前缓冲区刷入数据库（同步执行）
+// 用于定时聚合/关闭前的最后保障；写入失败会按现有 flush 策略处理并记录日志。
+func (s *SQLiteStore) FlushNow() {
+	s.flush()
 }
 
 // flush 刷新缓冲区到数据库

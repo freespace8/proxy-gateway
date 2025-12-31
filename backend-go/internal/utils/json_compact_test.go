@@ -327,3 +327,179 @@ func TestCodexResponsesFormat(t *testing.T) {
 
 	t.Logf("Codex Responses 格式化结果:\n%s", result)
 }
+
+// TestGeminiContentsFormat 测试 Gemini contents 数组的紧凑格式化
+func TestGeminiContentsFormat(t *testing.T) {
+	// 模拟 Gemini 请求格式
+	input := map[string]interface{}{
+		"contents": []interface{}{
+			map[string]interface{}{
+				"role": "user",
+				"parts": []interface{}{
+					map[string]interface{}{
+						"text": "Hello, this is a test message that might be quite long and should be truncated if it exceeds the limit. " + strings.Repeat("More text here. ", 20),
+					},
+				},
+			},
+			map[string]interface{}{
+				"role": "model",
+				"parts": []interface{}{
+					map[string]interface{}{
+						"text": "This is the model response.",
+					},
+					map[string]interface{}{
+						"functionCall": map[string]interface{}{
+							"name": "get_weather",
+							"args": map[string]interface{}{
+								"location": "San Francisco",
+								"unit":     "celsius",
+							},
+						},
+					},
+				},
+			},
+			map[string]interface{}{
+				"role": "user",
+				"parts": []interface{}{
+					map[string]interface{}{
+						"functionResponse": map[string]interface{}{
+							"name": "get_weather",
+							"response": map[string]interface{}{
+								"temperature": 18,
+								"condition":   "Clear sky",
+							},
+						},
+					},
+				},
+			},
+		},
+		"generationConfig": map[string]interface{}{
+			"maxOutputTokens": 1024,
+		},
+	}
+
+	result := FormatJSONForLog(input, 500)
+
+	// 验证 contents 数组被正确处理
+	if !strings.Contains(result, `"contents"`) {
+		t.Error("应该包含 contents 字段")
+	}
+
+	// 验证 parts 字段被保留
+	if !strings.Contains(result, `"parts"`) {
+		t.Error("应该包含 parts 字段")
+	}
+
+	// 验证 role 字段被保留
+	if !strings.Contains(result, `"role": "user"`) {
+		t.Error("应该包含 role 字段")
+	}
+
+	// 验证 functionCall 被保留
+	if !strings.Contains(result, `"functionCall"`) {
+		t.Error("应该包含 functionCall 字段")
+	}
+
+	// 验证 functionResponse 被保留
+	if !strings.Contains(result, `"functionResponse"`) {
+		t.Error("应该包含 functionResponse 字段")
+	}
+
+	// 验证长文本被截断
+	if strings.Contains(result, "More text here. More text here. More text here. More text here. More text here. More text here. More text here. More text here. More text here. More text here. More text here. More text here. More text here. More text here. More text here. More text here. More text here. More text here. More text here. More text here.") {
+		t.Error("长文本应该被截断")
+	}
+
+	t.Logf("Gemini contents 格式化结果:\n%s", result)
+}
+
+// TestGeminiToolsFormat 测试 Gemini tools 数组的简化显示
+func TestGeminiToolsFormat(t *testing.T) {
+	// 模拟 Gemini 请求中的 tools 格式
+	input := map[string]interface{}{
+		"contents": []interface{}{
+			map[string]interface{}{
+				"role": "user",
+				"parts": []interface{}{
+					map[string]interface{}{
+						"text": "List the files in the current directory",
+					},
+				},
+			},
+		},
+		"tools": []interface{}{
+			map[string]interface{}{
+				"functionDeclarations": []interface{}{
+					map[string]interface{}{
+						"name":        "list_directory",
+						"description": "Lists the names of files and subdirectories directly within a specified directory path.",
+						"parametersJsonSchema": map[string]interface{}{
+							"type": "object",
+							"properties": map[string]interface{}{
+								"dir_path": map[string]interface{}{
+									"type":        "string",
+									"description": "The path to the directory to list",
+								},
+							},
+							"required": []interface{}{"dir_path"},
+						},
+					},
+					map[string]interface{}{
+						"name":        "read_file",
+						"description": "Reads and returns the content of a specified file.",
+						"parametersJsonSchema": map[string]interface{}{
+							"type": "object",
+							"properties": map[string]interface{}{
+								"file_path": map[string]interface{}{
+									"type":        "string",
+									"description": "The path to the file to read.",
+								},
+							},
+							"required": []interface{}{"file_path"},
+						},
+					},
+					map[string]interface{}{
+						"name":        "write_file",
+						"description": "Writes content to a specified file.",
+						"parametersJsonSchema": map[string]interface{}{
+							"type": "object",
+							"properties": map[string]interface{}{
+								"file_path": map[string]interface{}{
+									"type":        "string",
+									"description": "The path to the file to write.",
+								},
+								"content": map[string]interface{}{
+									"type":        "string",
+									"description": "The content to write.",
+								},
+							},
+							"required": []interface{}{"file_path", "content"},
+						},
+					},
+				},
+			},
+		},
+		"generationConfig": map[string]interface{}{
+			"maxOutputTokens": 1024,
+		},
+	}
+
+	result := FormatJSONForLog(input, 500)
+
+	// 验证 tools 数组被简化为工具名称列表
+	if !strings.Contains(result, `"tools": ["list_directory", "read_file", "write_file"]`) {
+		t.Errorf("Gemini tools 应该被简化为工具名称列表，实际输出:\n%s", result)
+	}
+
+	// 验证完整的 parametersJsonSchema 没有出现在输出中
+	if strings.Contains(result, "parametersJsonSchema") {
+		t.Error("tools 中不应该包含 parametersJsonSchema")
+	}
+
+	// 验证完整的 description 没有出现在输出中
+	if strings.Contains(result, "Lists the names of files") {
+		t.Error("tools 中不应该包含完整的 description")
+	}
+
+	t.Logf("Gemini tools 格式化结果:\n%s", result)
+}

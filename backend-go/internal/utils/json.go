@@ -62,11 +62,7 @@ func SimplifyToolsArray(data interface{}) interface{} {
 			// 如果是tools字段且是数组,提取工具名称
 			if key == "tools" {
 				if toolsArray, ok := value.([]interface{}); ok {
-					simplifiedTools := make([]interface{}, len(toolsArray))
-					for i, tool := range toolsArray {
-						simplifiedTools[i] = extractToolName(tool)
-					}
-					result[key] = simplifiedTools
+					result[key] = extractToolNames(toolsArray)
 					continue
 				}
 			}
@@ -74,6 +70,13 @@ func SimplifyToolsArray(data interface{}) interface{} {
 			if key == "content" {
 				if contentArray, ok := value.([]interface{}); ok {
 					result[key] = compactContentArray(contentArray)
+					continue
+				}
+			}
+			// 如果是contents字段（Gemini格式）且是数组,紧凑显示
+			if key == "contents" {
+				if contentsArray, ok := value.([]interface{}); ok {
+					result[key] = compactGeminiContentsArray(contentsArray)
 					continue
 				}
 			}
@@ -207,6 +210,110 @@ func compactContentArray(contents []interface{}) []interface{} {
 	return result
 }
 
+// compactGeminiContentsArray 紧凑显示Gemini contents数组
+// Gemini格式: contents[].{role, parts[].{text, functionCall, functionResponse}}
+func compactGeminiContentsArray(contents []interface{}) []interface{} {
+	result := make([]interface{}, len(contents))
+	for i, item := range contents {
+		if contentMap, ok := item.(map[string]interface{}); ok {
+			compact := make(map[string]interface{})
+
+			// 保留role字段
+			if role, ok := contentMap["role"].(string); ok {
+				compact["role"] = role
+			}
+
+			// 处理parts数组
+			if parts, ok := contentMap["parts"].([]interface{}); ok {
+				compactParts := make([]interface{}, len(parts))
+				for j, part := range parts {
+					if partMap, ok := part.(map[string]interface{}); ok {
+						compactPart := compactGeminiPart(partMap)
+						compactParts[j] = compactPart
+					} else {
+						compactParts[j] = part
+					}
+				}
+				compact["parts"] = compactParts
+			}
+
+			result[i] = compact
+		} else {
+			result[i] = item
+		}
+	}
+	return result
+}
+
+// compactGeminiPart 紧凑显示单个Gemini part
+func compactGeminiPart(partMap map[string]interface{}) map[string]interface{} {
+	compact := make(map[string]interface{})
+
+	// 处理text字段
+	if text, ok := partMap["text"].(string); ok {
+		if len(text) > 200 {
+			compact["text"] = text[:200] + "..."
+		} else {
+			compact["text"] = text
+		}
+	}
+
+	// 处理functionCall字段
+	if fc, ok := partMap["functionCall"].(map[string]interface{}); ok {
+		compactFC := make(map[string]interface{})
+		if name, ok := fc["name"].(string); ok {
+			compactFC["name"] = name
+		}
+		// args字段紧凑显示
+		if args, ok := fc["args"]; ok {
+			compactFC["args"] = truncateInputValues(args, 200)
+		}
+		compact["functionCall"] = compactFC
+	}
+
+	// 处理functionResponse字段
+	if fr, ok := partMap["functionResponse"].(map[string]interface{}); ok {
+		compactFR := make(map[string]interface{})
+		if name, ok := fr["name"].(string); ok {
+			compactFR["name"] = name
+		}
+		// response字段紧凑显示
+		if response, ok := fr["response"]; ok {
+			compactFR["response"] = truncateInputValues(response, 200)
+		}
+		compact["functionResponse"] = compactFR
+	}
+
+	// 处理inlineData字段（图片等）
+	if inlineData, ok := partMap["inlineData"].(map[string]interface{}); ok {
+		compactInline := make(map[string]interface{})
+		if mimeType, ok := inlineData["mimeType"].(string); ok {
+			compactInline["mimeType"] = mimeType
+		}
+		// data字段只显示前50个字符
+		if data, ok := inlineData["data"].(string); ok {
+			if len(data) > 50 {
+				compactInline["data"] = data[:50] + "...[base64]"
+			} else {
+				compactInline["data"] = data
+			}
+		}
+		compact["inlineData"] = compactInline
+	}
+
+	// 处理fileData字段
+	if fileData, ok := partMap["fileData"].(map[string]interface{}); ok {
+		compact["fileData"] = fileData
+	}
+
+	// 处理thought字段
+	if thought, ok := partMap["thought"].(bool); ok && thought {
+		compact["thought"] = thought
+	}
+
+	return compact
+}
+
 // truncateInputValues 递归截断input对象中的长字符串值
 // 保留JSON结构,只截断字符串值到指定长度
 func truncateInputValues(data interface{}, maxLength int) interface{} {
@@ -236,7 +343,53 @@ func truncateInputValues(data interface{}, maxLength int) interface{} {
 	}
 }
 
-// extractToolName 从工具定义中提取名称
+// extractToolNames 从tools数组中提取所有工具名称
+// 支持Claude格式、OpenAI格式和Gemini格式
+func extractToolNames(toolsArray []interface{}) []interface{} {
+	var names []interface{}
+
+	for _, tool := range toolsArray {
+		toolMap, ok := tool.(map[string]interface{})
+		if !ok {
+			// 如果不是 map，可能已经是简化后的名称字符串
+			names = append(names, tool)
+			continue
+		}
+
+		// Gemini格式: tool.functionDeclarations[].name
+		if funcDecls, ok := toolMap["functionDeclarations"].([]interface{}); ok {
+			for _, funcDecl := range funcDecls {
+				if declMap, ok := funcDecl.(map[string]interface{}); ok {
+					if name, ok := declMap["name"].(string); ok {
+						names = append(names, name)
+					}
+				}
+			}
+			continue
+		}
+
+		// Claude格式: tool.name
+		if name, ok := toolMap["name"].(string); ok {
+			names = append(names, name)
+			continue
+		}
+
+		// OpenAI格式: tool.function.name
+		if function, ok := toolMap["function"].(map[string]interface{}); ok {
+			if name, ok := function["name"].(string); ok {
+				names = append(names, name)
+				continue
+			}
+		}
+
+		// 未知格式，保留原始对象
+		names = append(names, tool)
+	}
+
+	return names
+}
+
+// extractToolName 从工具定义中提取名称（保留用于兼容）
 // 支持Claude格式(tool.name)和OpenAI格式(tool.function.name)
 func extractToolName(tool interface{}) interface{} {
 	toolMap, ok := tool.(map[string]interface{})
@@ -359,8 +512,9 @@ func formatInputMapCompact(m map[string]interface{}) string {
 	return "{" + strings.Join(pairs, ", ") + "}"
 }
 
-// formatMessageAsOneLine 将message对象（包含role和content）格式化为紧凑的一行
-// 格式：{role: "user", content: [...]}
+// formatMessageAsOneLine 将message对象（包含role和content/parts）格式化为紧凑的一行
+// 支持Claude格式：{role: "user", content: [...]}
+// 支持Gemini格式：{role: "user", parts: [...]}
 func formatMessageAsOneLine(m map[string]interface{}) string {
 	var parts []string
 
@@ -370,7 +524,7 @@ func formatMessageAsOneLine(m map[string]interface{}) string {
 		parts = append(parts, `"role": `+string(roleJSON))
 	}
 
-	// 再输出content（紧凑格式）
+	// 处理content字段（Claude格式）
 	if content, ok := m["content"]; ok {
 		// 如果content是字符串，直接输出
 		if contentStr, isString := content.(string); isString {
@@ -388,6 +542,22 @@ func formatMessageAsOneLine(m map[string]interface{}) string {
 				}
 			}
 			parts = append(parts, `"content": [`+strings.Join(contentItems, ", ")+`]`)
+		}
+	}
+
+	// 处理parts字段（Gemini格式）
+	if partsField, ok := m["parts"]; ok {
+		if partsArray, isArray := partsField.([]interface{}); isArray {
+			partsItems := make([]string, len(partsArray))
+			for i, item := range partsArray {
+				if itemMap, ok := item.(map[string]interface{}); ok {
+					partsItems[i] = formatMapAsOneLine(itemMap)
+				} else {
+					itemJSON, _ := json.Marshal(item)
+					partsItems[i] = string(itemJSON)
+				}
+			}
+			parts = append(parts, `"parts": [`+strings.Join(partsItems, ", ")+`]`)
 		}
 	}
 

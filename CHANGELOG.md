@@ -4,6 +4,59 @@
 
 ---
 
+## [Unreleased]
+
+---
+
+## [v2.4.18] - 2025-12-31
+
+### 🐛 修复
+
+- **Gemini 日志和 Header 透传改进** - 修复 Gemini 接口的日志显示和请求头处理：
+  - 修复 `contents`/`parts` 字段在日志中不显示的问题
+  - 修复原生 Gemini handler 未透传客户端 Header 的问题
+  - 新增 `compactGeminiContentsArray` 和 `compactGeminiPart` 函数
+  - 涉及文件：`backend-go/internal/utils/json.go`、`backend-go/internal/handlers/gemini/handler.go`
+
+### 🔧 重构
+
+- **Gemini tools 日志简化支持** - 新增 `extractToolNames` 函数支持 Gemini 格式的工具提取：
+  - 支持 Gemini `functionDeclarations` 数组格式
+  - 兼容 Claude 和 OpenAI 格式
+  - 日志中 tools 字段现在统一显示为 `["tool1", "tool2", ...]` 格式
+  - 涉及文件：`backend-go/internal/utils/json.go`
+
+- **移除非标准 Gemini API 路由** - 简化 API 端点，仅保留官方格式：
+  - 移除：`POST /v1/models/{model}:generateContent`（非标准简化格式）
+  - 保留：`POST /v1beta/models/{model}:generateContent`（Gemini 官方格式）
+  - 更新前端预览 URL 显示完整路径格式 `/models/{model}:generateContent`
+  - 涉及文件：`backend-go/main.go`、`frontend/src/components/AddChannelModal.vue`
+
+---
+
+## [v2.4.17] - 2025-12-30
+
+### 🐛 修复
+
+- **修复 ModelMapping 导致请求字段丢失** - 解决使用模型重定向时 Claude API 返回 403 的问题：
+  - 原因：`ClaudeRequest` 结构体缺少 `metadata` 字段，JSON 反序列化时该字段被丢弃
+  - 表现：配置 `modelMapping` 后请求被上游拒绝（如 `opus` → `claude-opus-4-5-20251101`）
+  - 修复：在 `ClaudeRequest` 中添加 `Metadata map[string]interface{}` 字段
+  - 涉及文件：`backend-go/internal/types/types.go`
+
+---
+
+## [v2.4.16] - 2025-12-30
+
+### 🐛 修复
+
+- **修复 Gemini 渠道预期请求 URL 预览** - 创建渠道时预览显示正确的 `/v1beta` 路径：
+  - 原问题：Gemini 渠道预览错误显示 `/v1` 而后端实际使用 `/v1beta`
+  - 修复：当 serviceType 为 gemini 时使用 `/v1beta` 作为版本前缀
+  - 涉及文件：`frontend/src/components/AddChannelModal.vue`
+
+---
+
 ## [v2.4.15] - 2025-12-30
 
 ### 🐛 修复

@@ -240,6 +240,11 @@ func main() {
 	r.POST("/v1/responses", responses.Handler(envCfg, cfgManager, sessionManager, channelScheduler))
 	r.POST("/v1/responses/compact", responses.CompactHandler(envCfg, cfgManager, sessionManager, channelScheduler))
 
+	// 代理端点 - Gemini API (原生协议)
+	// 使用通配符捕获 model:action 格式，如 gemini-pro:generateContent
+	// 路径格式：/v1beta/models/{model}:generateContent (Gemini 原生格式)
+	r.POST("/v1beta/models/*modelAction", gemini.Handler(envCfg, cfgManager, channelScheduler))
+
 	// 静态文件服务 (嵌入的前端)
 	if envCfg.EnableWebUI {
 		handlers.ServeFrontend(r, frontendFS)
@@ -274,6 +279,8 @@ func main() {
 	fmt.Printf("[Server-Info] API 地址: http://localhost:%d/v1\n", envCfg.Port)
 	fmt.Printf("[Server-Info] Claude Messages: POST /v1/messages\n")
 	fmt.Printf("[Server-Info] Codex Responses: POST /v1/responses\n")
+	fmt.Printf("[Server-Info] Gemini API: POST /v1beta/models/{model}:generateContent\n")
+	fmt.Printf("[Server-Info] Gemini API: POST /v1beta/models/{model}:streamGenerateContent\n")
 	fmt.Printf("[Server-Info] 健康检查: GET /health\n")
 	fmt.Printf("[Server-Info] 环境: %s\n", envCfg.Env)
 	// 检查是否使用默认密码，给予提示

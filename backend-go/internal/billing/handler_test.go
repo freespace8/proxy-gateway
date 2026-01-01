@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/BenedictKing/claude-proxy/internal/pricing"
 	"github.com/BenedictKing/claude-proxy/internal/usage"
@@ -200,6 +199,56 @@ func TestHandler_Release_AlreadyCharged(t *testing.T) {
 	handler.Release(ctx)
 }
 
+func TestHandler_Release_DoubleRelease(t *testing.T) {
+	releaseCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/billing/release" {
+			releaseCount++
+			w.WriteHeader(200)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	handler := NewHandler(client, nil, nil, 500)
+
+	ctx := &RequestContext{
+		RequestID:    "req-123",
+		APIKey:       "test-key",
+		PreAuthCents: 500,
+		Charged:      false,
+		Released:     false,
+	}
+
+	// 第一次释放
+	handler.Release(ctx)
+	if releaseCount != 1 {
+		t.Errorf("First release should call server once, got %d", releaseCount)
+	}
+	if !ctx.Released {
+		t.Error("Released should be true after first release")
+	}
+
+	// 第二次释放（不应调用服务器）
+	handler.Release(ctx)
+	if releaseCount != 1 {
+		t.Errorf("Second release should not call server, got %d calls", releaseCount)
+	}
+}
+
+func TestHandler_Release_NilClient(t *testing.T) {
+	handler := NewHandler(nil, nil, nil, 500)
+
+	ctx := &RequestContext{
+		RequestID:    "req-123",
+		APIKey:       "test-key",
+		PreAuthCents: 500,
+	}
+
+	// 不应 panic
+	handler.Release(ctx)
+}
+
 func TestHandler_IsEnabled(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -263,8 +312,7 @@ func TestHandler_AfterRequest_ChargeFailed(t *testing.T) {
 		t.Error("Charged should remain false when charge fails")
 	}
 
-	// 不应记录 usage
-	time.Sleep(10 * time.Millisecond)
+	// 不应记录 usage（Store.Add 是同步的，无需 sleep）
 	records := usageStore.GetRecent(10)
 	if len(records) != 0 {
 		t.Errorf("Should not add usage record when charge fails, got %d", len(records))

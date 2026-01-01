@@ -22,6 +22,12 @@
   - 新增 `pricingService`、`usageStore`、`client` 的 nil 检查
   - 涉及文件：`backend-go/internal/billing/handler.go`
 
+- **修复双重释放风险** - 防止同一 request_id 被 release 两次：
+  - 在 `RequestContext` 中新增 `Released` 状态标记
+  - `Release` 方法检查 `Released` 状态，避免重复调用
+  - 新增 `h.client == nil` 防御检查
+  - 涉及文件：`backend-go/internal/billing/handler.go`
+
 ---
 
 ## [v2.4.18] - 2025-12-31

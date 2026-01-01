@@ -34,6 +34,7 @@ type RequestContext struct {
 	APIKey       string
 	PreAuthCents int64
 	Charged      bool
+	Released     bool // 防止双重释放
 }
 
 // BeforeRequest 请求前处理：预授权
@@ -103,12 +104,16 @@ func (h *Handler) AfterRequest(ctx *RequestContext, model string, inputTokens, o
 
 // Release 释放预授权（请求失败时调用）
 func (h *Handler) Release(ctx *RequestContext) {
-	if ctx == nil || ctx.Charged {
+	if ctx == nil || ctx.Charged || ctx.Released {
+		return
+	}
+	if h.client == nil {
 		return
 	}
 	if err := h.client.Release(ctx.APIKey, ctx.RequestID, ctx.PreAuthCents); err != nil {
 		log.Printf("[Billing-Error] 释放预授权失败: %v", err)
 	}
+	ctx.Released = true // 标记已释放，防止双重释放
 }
 
 // IsEnabled 检查计费是否启用

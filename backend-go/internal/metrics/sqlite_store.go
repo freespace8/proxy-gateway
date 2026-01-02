@@ -125,6 +125,8 @@ func initSchema(db *sql.DB) error {
 			output_tokens INTEGER DEFAULT 0,
 			cache_creation_tokens INTEGER DEFAULT 0,
 			cache_read_tokens INTEGER DEFAULT 0,
+			model TEXT DEFAULT '',
+			cost_cents INTEGER DEFAULT 0,
 			api_type TEXT NOT NULL DEFAULT 'messages'
 		);
 
@@ -151,19 +153,62 @@ func initSchema(db *sql.DB) error {
 			output_tokens INTEGER DEFAULT 0,
 			cache_creation_tokens INTEGER DEFAULT 0,
 			cache_read_tokens INTEGER DEFAULT 0,
+			cost_cents INTEGER DEFAULT 0,
 			UNIQUE(date, api_type, metrics_key)
 		);
 
 		CREATE INDEX IF NOT EXISTS idx_daily_stats_date_api
 			ON daily_stats(date, api_type);
+
+		-- 请求日志表（仅保留 24 小时，用于排障/审计）
+		CREATE TABLE IF NOT EXISTS request_logs (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			request_id TEXT NOT NULL,
+			channel_index INTEGER NOT NULL,
+			channel_name TEXT NOT NULL,
+			key_mask TEXT NOT NULL,
+			timestamp INTEGER NOT NULL,
+			duration_ms INTEGER NOT NULL,
+			status_code INTEGER NOT NULL,
+			success INTEGER NOT NULL,
+			model TEXT DEFAULT '',
+			input_tokens INTEGER DEFAULT 0,
+			output_tokens INTEGER DEFAULT 0,
+			cache_creation_tokens INTEGER DEFAULT 0,
+			cache_read_tokens INTEGER DEFAULT 0,
+			cost_cents INTEGER DEFAULT 0,
+			error_message TEXT DEFAULT '',
+			api_type TEXT NOT NULL
+		);
+
+		CREATE INDEX IF NOT EXISTS idx_request_logs_api_type_timestamp
+			ON request_logs(api_type, timestamp DESC);
+
+		CREATE INDEX IF NOT EXISTS idx_request_logs_request_id
+			ON request_logs(request_id);
 	`
 
 	_, err := db.Exec(schema)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// 迁移：为旧表添加新列（如果不存在）
+	migrations := []string{
+		"ALTER TABLE request_records ADD COLUMN model TEXT DEFAULT ''",
+		"ALTER TABLE request_records ADD COLUMN cost_cents INTEGER DEFAULT 0",
+		"ALTER TABLE daily_stats ADD COLUMN cost_cents INTEGER DEFAULT 0",
+	}
+	for _, m := range migrations {
+		// 忽略 "duplicate column" 错误
+		db.Exec(m)
+	}
+
+	return nil
 }
 
 // AggregateDailyStats 聚合指定日期（本地日历日）的请求记录到 daily_stats（幂等，可重复执行）
-// 注意：仅聚合完整自然日（建议用于 yesterday / 历史日），不要用于正在写入的“今天”。
+// 注意：仅聚合完整自然日（建议用于 yesterday / 历史日），不要用于正在写入的"今天"。
 func (s *SQLiteStore) AggregateDailyStats(day time.Time) error {
 	loc := day.Location()
 	if loc == nil {
@@ -178,7 +223,7 @@ func (s *SQLiteStore) AggregateDailyStats(day time.Time) error {
 		INSERT INTO daily_stats (
 			date, api_type, metrics_key, base_url, key_mask,
 			total_requests, success_count, failure_count,
-			input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens
+			input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, cost_cents
 		)
 		SELECT
 			?, api_type, metrics_key, base_url, key_mask,
@@ -188,7 +233,8 @@ func (s *SQLiteStore) AggregateDailyStats(day time.Time) error {
 			COALESCE(SUM(input_tokens), 0) AS input_tokens,
 			COALESCE(SUM(output_tokens), 0) AS output_tokens,
 			COALESCE(SUM(cache_creation_tokens), 0) AS cache_creation_tokens,
-			COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens
+			COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
+			COALESCE(SUM(cost_cents), 0) AS cost_cents
 		FROM request_records
 		WHERE timestamp >= ? AND timestamp < ?
 		GROUP BY api_type, metrics_key, base_url, key_mask
@@ -201,7 +247,8 @@ func (s *SQLiteStore) AggregateDailyStats(day time.Time) error {
 			input_tokens = excluded.input_tokens,
 			output_tokens = excluded.output_tokens,
 			cache_creation_tokens = excluded.cache_creation_tokens,
-			cache_read_tokens = excluded.cache_read_tokens
+			cache_read_tokens = excluded.cache_read_tokens,
+			cost_cents = excluded.cost_cents
 	`, dateStr, start.Unix(), end.Unix())
 	if err != nil {
 		return fmt.Errorf("聚合 daily_stats 失败 (%s): %w", dateStr, err)
@@ -326,8 +373,8 @@ func (s *SQLiteStore) batchInsertRecords(records []PersistentRecord) error {
 	stmt, err := tx.Prepare(`
 		INSERT INTO request_records
 		(metrics_key, base_url, key_mask, timestamp, success,
-		 input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, api_type)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, model, cost_cents, api_type)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return err
@@ -341,7 +388,7 @@ func (s *SQLiteStore) batchInsertRecords(records []PersistentRecord) error {
 		}
 		_, err := stmt.Exec(
 			r.MetricsKey, r.BaseURL, r.KeyMask, r.Timestamp.Unix(), success,
-			r.InputTokens, r.OutputTokens, r.CacheCreationTokens, r.CacheReadTokens, r.APIType,
+			r.InputTokens, r.OutputTokens, r.CacheCreationTokens, r.CacheReadTokens, r.Model, r.CostCents, r.APIType,
 		)
 		if err != nil {
 			return err
@@ -355,7 +402,8 @@ func (s *SQLiteStore) batchInsertRecords(records []PersistentRecord) error {
 func (s *SQLiteStore) LoadRecords(since time.Time, apiType string) ([]PersistentRecord, error) {
 	rows, err := s.db.Query(`
 		SELECT metrics_key, base_url, key_mask, timestamp, success,
-		       input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens
+		       input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens,
+		       COALESCE(model, '') AS model, COALESCE(cost_cents, 0) AS cost_cents
 		FROM request_records
 		WHERE timestamp >= ? AND api_type = ?
 		ORDER BY timestamp ASC
@@ -374,6 +422,7 @@ func (s *SQLiteStore) LoadRecords(since time.Time, apiType string) ([]Persistent
 		err := rows.Scan(
 			&r.MetricsKey, &r.BaseURL, &r.KeyMask, &ts, &success,
 			&r.InputTokens, &r.OutputTokens, &r.CacheCreationTokens, &r.CacheReadTokens,
+			&r.Model, &r.CostCents,
 		)
 		if err != nil {
 			return nil, err
@@ -446,6 +495,13 @@ func (s *SQLiteStore) doCleanup() {
 	} else if deleted > 0 {
 		log.Printf("[SQLite-Cleanup] 已清理 %d 条过期指标记录（超过 %d 天）", deleted, s.retentionDays)
 	}
+
+	logDeleted, logErr := s.CleanupOldRequestLogs()
+	if logErr != nil {
+		log.Printf("[SQLite-Cleanup] 警告: 清理过期请求日志失败: %v", logErr)
+	} else if logDeleted > 0 {
+		log.Printf("[SQLite-Cleanup] 已清理 %d 条过期请求日志（超过 24 小时）", logDeleted)
+	}
 }
 
 // Close 关闭存储
@@ -511,6 +567,7 @@ type AggregatedStats struct {
 	OutputTokens        int64
 	CacheCreationTokens int64
 	CacheReadTokens     int64
+	CostCents           int64
 }
 
 func (s *SQLiteStore) QueryRequestRecordTotals(apiType string, start, end time.Time, metricsKeys []string) (AggregatedStats, error) {
@@ -525,7 +582,8 @@ func (s *SQLiteStore) QueryRequestRecordTotals(apiType string, start, end time.T
 			COALESCE(SUM(input_tokens), 0) AS input_tokens,
 			COALESCE(SUM(output_tokens), 0) AS output_tokens,
 			COALESCE(SUM(cache_creation_tokens), 0) AS cache_creation_tokens,
-			COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens
+			COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
+			COALESCE(SUM(cost_cents), 0) AS cost_cents
 		FROM request_records
 		WHERE api_type = ? AND timestamp >= ? AND timestamp < ?
 	`)
@@ -548,6 +606,7 @@ func (s *SQLiteStore) QueryRequestRecordTotals(apiType string, start, end time.T
 		&out.OutputTokens,
 		&out.CacheCreationTokens,
 		&out.CacheReadTokens,
+		&out.CostCents,
 	)
 	if err != nil {
 		return AggregatedStats{}, err
@@ -575,7 +634,8 @@ func (s *SQLiteStore) QueryRequestRecordBucketStats(apiType string, start, end t
 			COALESCE(SUM(input_tokens), 0) AS input_tokens,
 			COALESCE(SUM(output_tokens), 0) AS output_tokens,
 			COALESCE(SUM(cache_creation_tokens), 0) AS cache_creation_tokens,
-			COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens
+			COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
+			COALESCE(SUM(cost_cents), 0) AS cost_cents
 		FROM request_records
 		WHERE api_type = ? AND timestamp > ? AND timestamp < ?
 	`)
@@ -610,6 +670,7 @@ func (s *SQLiteStore) QueryRequestRecordBucketStats(apiType string, start, end t
 			&agg.OutputTokens,
 			&agg.CacheCreationTokens,
 			&agg.CacheReadTokens,
+			&agg.CostCents,
 		); err != nil {
 			return nil, err
 		}
@@ -634,7 +695,8 @@ func (s *SQLiteStore) QueryDailyTotals(apiType, startDate, endDate string, metri
 			COALESCE(SUM(input_tokens), 0) AS input_tokens,
 			COALESCE(SUM(output_tokens), 0) AS output_tokens,
 			COALESCE(SUM(cache_creation_tokens), 0) AS cache_creation_tokens,
-			COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens
+			COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
+			COALESCE(SUM(cost_cents), 0) AS cost_cents
 		FROM daily_stats
 		WHERE api_type = ? AND date >= ? AND date <= ?
 	`)
@@ -669,6 +731,7 @@ func (s *SQLiteStore) QueryDailyTotals(apiType, startDate, endDate string, metri
 			&agg.OutputTokens,
 			&agg.CacheCreationTokens,
 			&agg.CacheReadTokens,
+			&agg.CostCents,
 		); err != nil {
 			return nil, err
 		}
@@ -685,4 +748,143 @@ func (s *SQLiteStore) GetRecordCount() (int64, error) {
 	var count int64
 	err := s.db.QueryRow("SELECT COUNT(*) FROM request_records").Scan(&count)
 	return count, err
+}
+
+func (s *SQLiteStore) AddRequestLog(logRecord RequestLogRecord) error {
+	if logRecord.APIType == "" {
+		return fmt.Errorf("api_type 不能为空")
+	}
+	if logRecord.RequestID == "" {
+		return fmt.Errorf("request_id 不能为空")
+	}
+
+	s.bufferMu.Lock()
+	closed := s.closed
+	s.bufferMu.Unlock()
+	if closed {
+		return fmt.Errorf("SQLiteStore 已关闭")
+	}
+
+	success := 0
+	if logRecord.Success {
+		success = 1
+	}
+
+	_, err := s.db.Exec(`
+		INSERT INTO request_logs (
+			request_id, channel_index, channel_name, key_mask,
+			timestamp, duration_ms, status_code, success,
+			model, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens,
+			cost_cents, error_message, api_type
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`,
+		logRecord.RequestID,
+		logRecord.ChannelIndex,
+		logRecord.ChannelName,
+		logRecord.KeyMask,
+		logRecord.Timestamp.Unix(),
+		logRecord.DurationMs,
+		logRecord.StatusCode,
+		success,
+		logRecord.Model,
+		logRecord.InputTokens,
+		logRecord.OutputTokens,
+		logRecord.CacheCreationTokens,
+		logRecord.CacheReadTokens,
+		logRecord.CostCents,
+		logRecord.ErrorMessage,
+		logRecord.APIType,
+	)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *SQLiteStore) QueryRequestLogs(apiType string, limit, offset int) ([]RequestLogRecord, int64, error) {
+	if apiType == "" {
+		return nil, 0, fmt.Errorf("api_type 不能为空")
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	var total int64
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM request_logs WHERE api_type = ?`, apiType).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	rows, err := s.db.Query(`
+		SELECT
+			id, request_id, channel_index, channel_name, key_mask,
+			timestamp, duration_ms, status_code, success,
+			COALESCE(model, '') AS model,
+			COALESCE(input_tokens, 0) AS input_tokens,
+			COALESCE(output_tokens, 0) AS output_tokens,
+			COALESCE(cache_creation_tokens, 0) AS cache_creation_tokens,
+			COALESCE(cache_read_tokens, 0) AS cache_read_tokens,
+			COALESCE(cost_cents, 0) AS cost_cents,
+			COALESCE(error_message, '') AS error_message
+		FROM request_logs
+		WHERE api_type = ?
+		ORDER BY timestamp DESC, id DESC
+		LIMIT ? OFFSET ?
+	`, apiType, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	logs := make([]RequestLogRecord, 0, limit)
+	for rows.Next() {
+		var r RequestLogRecord
+		var ts int64
+		var success int
+
+		if err := rows.Scan(
+			&r.ID,
+			&r.RequestID,
+			&r.ChannelIndex,
+			&r.ChannelName,
+			&r.KeyMask,
+			&ts,
+			&r.DurationMs,
+			&r.StatusCode,
+			&success,
+			&r.Model,
+			&r.InputTokens,
+			&r.OutputTokens,
+			&r.CacheCreationTokens,
+			&r.CacheReadTokens,
+			&r.CostCents,
+			&r.ErrorMessage,
+		); err != nil {
+			return nil, 0, err
+		}
+
+		r.Timestamp = time.Unix(ts, 0)
+		r.Success = success == 1
+		r.APIType = apiType
+		logs = append(logs, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+
+	return logs, total, nil
+}
+
+func (s *SQLiteStore) CleanupOldRequestLogs() (int64, error) {
+	cutoff := time.Now().Add(-24 * time.Hour).Unix()
+	result, err := s.db.Exec("DELETE FROM request_logs WHERE timestamp < ?", cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }

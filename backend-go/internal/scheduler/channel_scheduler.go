@@ -303,8 +303,8 @@ func (s *ChannelScheduler) RecordSuccess(baseURL, apiKey string, isResponses boo
 }
 
 // RecordSuccessWithUsage 记录渠道成功（带 Usage 数据）
-func (s *ChannelScheduler) RecordSuccessWithUsage(baseURL, apiKey string, usage *types.Usage, isResponses bool) {
-	s.getMetricsManager(isResponses).RecordSuccessWithUsage(baseURL, apiKey, usage)
+func (s *ChannelScheduler) RecordSuccessWithUsage(baseURL, apiKey string, usage *types.Usage, isResponses bool, model string, costCents int64) {
+	s.getMetricsManager(isResponses).RecordSuccessWithUsage(baseURL, apiKey, usage, model, costCents)
 }
 
 // RecordFailure 记录渠道失败（使用 baseURL + apiKey）
@@ -639,8 +639,8 @@ func (s *ChannelScheduler) RecordGeminiSuccess(baseURL, apiKey string) {
 }
 
 // RecordGeminiSuccessWithUsage 记录 Gemini 渠道成功（带 Usage 数据）
-func (s *ChannelScheduler) RecordGeminiSuccessWithUsage(baseURL, apiKey string, usage *types.Usage) {
-	s.geminiMetricsManager.RecordSuccessWithUsage(baseURL, apiKey, usage)
+func (s *ChannelScheduler) RecordGeminiSuccessWithUsage(baseURL, apiKey string, usage *types.Usage, model string, costCents int64) {
+	s.geminiMetricsManager.RecordSuccessWithUsage(baseURL, apiKey, usage, model, costCents)
 }
 
 // RecordGeminiFailure 记录 Gemini 渠道失败

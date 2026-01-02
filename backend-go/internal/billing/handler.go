@@ -120,3 +120,11 @@ func (h *Handler) Release(ctx *RequestContext) {
 func (h *Handler) IsEnabled() bool {
 	return h.client != nil && h.client.IsEnabled()
 }
+
+// CalculateCost 计算成本（美分）
+func (h *Handler) CalculateCost(model string, inputTokens, outputTokens int) int64 {
+	if h.pricingService == nil {
+		return 0
+	}
+	return h.pricingService.Calculate(model, inputTokens, outputTokens)
+}

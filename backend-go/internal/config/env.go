@@ -38,8 +38,8 @@ type EnvConfig struct {
 	LogCompress   bool // 是否压缩旧日志文件
 	LogToConsole  bool // 是否同时输出到控制台
 	// 计费配置
-	SweAgentBillingURL   string // swe-agent 计费服务 URL
-	PreAuthAmountCents   int64  // 预授权金额 (cents)
+	SweAgentBillingURL    string // swe-agent 计费服务 URL
+	PreAuthAmountCents    int64  // 预授权金额 (cents)
 	PricingUpdateInterval string // 价格表更新间隔
 }
 

@@ -13,11 +13,11 @@ func TestService_Calculate(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		models := map[string]*ModelPricing{
 			"claude-3-5-sonnet-20241022": {
-				InputCostPerToken:  0.000003,  // $3/M
+				InputCostPerToken:  0.000003, // $3/M
 				OutputCostPerToken: 0.000015, // $15/M
 			},
 			"gpt-4": {
-				InputCostPerToken:  0.00003,  // $30/M
+				InputCostPerToken:  0.00003, // $30/M
 				OutputCostPerToken: 0.00006, // $60/M
 			},
 		}

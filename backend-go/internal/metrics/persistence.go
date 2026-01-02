@@ -30,5 +30,7 @@ type PersistentRecord struct {
 	OutputTokens        int64     // 输出 Token 数
 	CacheCreationTokens int64     // 缓存创建 Token
 	CacheReadTokens     int64     // 缓存读取 Token
+	Model               string    // 模型名称
+	CostCents           int64     // 成本（美分）
 	APIType             string    // "messages" 或 "responses"
 }

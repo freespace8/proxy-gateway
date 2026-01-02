@@ -38,6 +38,10 @@
           <v-icon size="small" class="mr-1">mdi-database</v-icon>
           Cache
         </v-btn>
+        <v-btn value="cost" size="x-small">
+          <v-icon size="small" class="mr-1">mdi-currency-usd</v-icon>
+          Cost
+        </v-btn>
       </v-btn-toggle>
     </div>
 
@@ -82,7 +86,7 @@ const props = defineProps<{
 }>()
 
 // View mode type
-type ViewMode = 'traffic' | 'tokens' | 'cache'
+type ViewMode = 'traffic' | 'tokens' | 'cache' | 'cost'
 type Duration = '1h' | '6h' | '24h' | 'today'
 
 // Theme
@@ -128,7 +132,7 @@ const keyColors = [
   '#10b981', // 绿色
   '#8b5cf6', // 紫色
   '#ec4899', // 粉色
-  '#eab308', // 黄色
+  '#f59e0b', // 琥珀色
   '#06b6d4', // 青色
   '#f43f5e', // 玫红
   '#84cc16', // 酸橙绿
@@ -389,8 +393,6 @@ const buildChartSeries = (data: ChannelKeyMetricsHistoryResponse | null) => {
   const result: { name: string; data: { x: number; y: number }[] }[] = []
 
   data.keys.forEach((keyData, keyIndex) => {
-    const color = keyColors[keyIndex % keyColors.length]
-
     if (mode === 'traffic') {
       // 单向模式：只显示请求数
       result.push({
@@ -398,6 +400,14 @@ const buildChartSeries = (data: ChannelKeyMetricsHistoryResponse | null) => {
         data: keyData.dataPoints.map(dp => ({
           x: new Date(dp.timestamp).getTime(),
           y: dp.requestCount
+        }))
+      })
+    } else if (mode === 'cost') {
+      result.push({
+        name: keyData.keyMask,
+        data: keyData.dataPoints.map(dp => ({
+          x: new Date(dp.timestamp).getTime(),
+          y: dp.costCents ?? 0
         }))
       })
     } else {
@@ -448,11 +458,20 @@ const formatNumber = (num: number): string => {
   return num.toFixed(0)
 }
 
+const formatCost = (cents: number): string => {
+  const dollars = cents / 100
+  if (dollars >= 1000) return '$' + (dollars / 1000).toFixed(2) + 'K'
+  if (dollars >= 1) return '$' + dollars.toFixed(2)
+  return '$' + dollars.toFixed(4)
+}
+
 // Helper: format axis value based on view mode
 const formatAxisValue = (val: number, mode: ViewMode): string => {
   switch (mode) {
     case 'traffic':
       return Math.round(val).toString()
+    case 'cost':
+      return formatCost(Math.round(val))
     case 'tokens':
     case 'cache':
       return formatNumber(Math.abs(val))
@@ -466,6 +485,8 @@ const formatTooltipValue = (val: number, mode: ViewMode): string => {
   switch (mode) {
     case 'traffic':
       return `${Math.round(val)} 请求`
+    case 'cost':
+      return formatCost(Math.round(val))
     case 'tokens':
     case 'cache':
       return formatNumber(Math.abs(val))
@@ -595,7 +616,7 @@ const getDurationMs = (duration: Duration): number => {
 // traffic 模式：全部实线
 // tokens/cache 模式：每个 key 有两个 series（正向实线、负向虚线）
 const getDashArray = (): number | number[] => {
-  if (selectedView.value === 'traffic') {
+  if (selectedView.value === 'traffic' || selectedView.value === 'cost') {
     return 0 // 全部实线
   }
   // 双向模式：每个 key 产生 2 个 series [正向实线, 负向虚线]
@@ -615,7 +636,7 @@ const getChartColors = (): string[] => {
   const keyCount = historyData.value?.keys?.length || 0
   if (keyCount === 0) return keyColors
 
-  if (selectedView.value === 'traffic') {
+  if (selectedView.value === 'traffic' || selectedView.value === 'cost') {
     // 流量模式：每个 key 一种颜色
     return historyData.value!.keys.map((_, i) => keyColors[i % keyColors.length])
   }

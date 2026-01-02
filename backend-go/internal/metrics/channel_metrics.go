@@ -12,7 +12,7 @@ import (
 	"github.com/BenedictKing/claude-proxy/internal/utils"
 )
 
-// RequestRecord 带时间戳的请求记录（扩展版，支持 Token 和 Cache 数据）
+// RequestRecord 带时间戳的请求记录（扩展版，支持 Token、Cache 和成本数据）
 type RequestRecord struct {
 	Timestamp                time.Time
 	Success                  bool
@@ -20,6 +20,8 @@ type RequestRecord struct {
 	OutputTokens             int64
 	CacheCreationInputTokens int64
 	CacheReadInputTokens     int64
+	Model                    string // 模型名称
+	CostCents                int64  // 成本（美分）
 }
 
 // KeyMetrics 单个 Key 的指标（绑定到 BaseURL + Key 组合）
@@ -175,6 +177,8 @@ func (m *MetricsManager) loadFromStore() error {
 			OutputTokens:             r.OutputTokens,
 			CacheCreationInputTokens: r.CacheCreationTokens,
 			CacheReadInputTokens:     r.CacheReadTokens,
+			Model:                    r.Model,
+			CostCents:                r.CostCents,
 		})
 
 		// 更新聚合计数
@@ -262,11 +266,11 @@ func (m *MetricsManager) getOrCreateKey(baseURL, apiKey string) *KeyMetrics {
 
 // RecordSuccess 记录成功请求（新方法，使用 baseURL + apiKey）
 func (m *MetricsManager) RecordSuccess(baseURL, apiKey string) {
-	m.RecordSuccessWithUsage(baseURL, apiKey, nil)
+	m.RecordSuccessWithUsage(baseURL, apiKey, nil, "", 0)
 }
 
 // RecordSuccessWithUsage 记录成功请求（带 Usage 数据）
-func (m *MetricsManager) RecordSuccessWithUsage(baseURL, apiKey string, usage *types.Usage) {
+func (m *MetricsManager) RecordSuccessWithUsage(baseURL, apiKey string, usage *types.Usage, model string, costCents int64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -297,7 +301,7 @@ func (m *MetricsManager) RecordSuccessWithUsage(baseURL, apiKey string, usage *t
 	}
 
 	// 记录带时间戳的请求
-	m.appendToHistoryKeyWithUsage(metrics, now, true, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens)
+	m.appendToHistoryKeyWithUsage(metrics, now, true, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, model, costCents)
 
 	// 写入持久化存储（异步，不阻塞）
 	if m.store != nil {
@@ -311,6 +315,8 @@ func (m *MetricsManager) RecordSuccessWithUsage(baseURL, apiKey string, usage *t
 			OutputTokens:        outputTokens,
 			CacheCreationTokens: cacheCreationTokens,
 			CacheReadTokens:     cacheReadTokens,
+			Model:               model,
+			CostCents:           costCents,
 			APIType:             m.apiType,
 		})
 	}
@@ -393,11 +399,11 @@ func (m *MetricsManager) appendToWindowKey(metrics *KeyMetrics, success bool) {
 
 // appendToHistoryKey 向 Key 历史记录添加请求（保留24小时）
 func (m *MetricsManager) appendToHistoryKey(metrics *KeyMetrics, timestamp time.Time, success bool) {
-	m.appendToHistoryKeyWithUsage(metrics, timestamp, success, 0, 0, 0, 0)
+	m.appendToHistoryKeyWithUsage(metrics, timestamp, success, 0, 0, 0, 0, "", 0)
 }
 
 // appendToHistoryKeyWithUsage 向 Key 历史记录添加请求（带 Usage 数据）
-func (m *MetricsManager) appendToHistoryKeyWithUsage(metrics *KeyMetrics, timestamp time.Time, success bool, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens int64) {
+func (m *MetricsManager) appendToHistoryKeyWithUsage(metrics *KeyMetrics, timestamp time.Time, success bool, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens int64, model string, costCents int64) {
 	metrics.requestHistory = append(metrics.requestHistory, RequestRecord{
 		Timestamp:                timestamp,
 		Success:                  success,
@@ -405,6 +411,8 @@ func (m *MetricsManager) appendToHistoryKeyWithUsage(metrics *KeyMetrics, timest
 		OutputTokens:             outputTokens,
 		CacheCreationInputTokens: cacheCreationTokens,
 		CacheReadInputTokens:     cacheReadTokens,
+		Model:                    model,
+		CostCents:                costCents,
 	})
 
 	// 清理超过24小时的记录
@@ -1161,6 +1169,7 @@ type KeyHistoryDataPoint struct {
 	OutputTokens             int64     `json:"outputTokens"`
 	CacheCreationInputTokens int64     `json:"cacheCreationTokens"`
 	CacheReadInputTokens     int64     `json:"cacheReadTokens"`
+	CostCents                int64     `json:"costCents"` // 成本（美分）
 }
 
 // GetHistoricalStats 获取历史统计数据（按时间间隔聚合）
@@ -1516,6 +1525,7 @@ func (m *MetricsManager) GetKeyHistoricalStats(baseURL, apiKey string, duration,
 				b.outputTokens += record.OutputTokens
 				b.cacheCreationTokens += record.CacheCreationInputTokens
 				b.cacheReadTokens += record.CacheReadInputTokens
+				b.costCents += record.CostCents
 			}
 		}
 	}
@@ -1539,6 +1549,7 @@ func (m *MetricsManager) GetKeyHistoricalStats(baseURL, apiKey string, duration,
 			OutputTokens:             b.outputTokens,
 			CacheCreationInputTokens: b.cacheCreationTokens,
 			CacheReadInputTokens:     b.cacheReadTokens,
+			CostCents:                b.costCents,
 		}
 	}
 
@@ -1600,6 +1611,7 @@ func (m *MetricsManager) getKeyHistoricalStatsFromRequestRecords(store *SQLiteSt
 			OutputTokens:             agg.OutputTokens,
 			CacheCreationInputTokens: agg.CacheCreationTokens,
 			CacheReadInputTokens:     agg.CacheReadTokens,
+			CostCents:                agg.CostCents,
 		}
 	}
 
@@ -1683,6 +1695,7 @@ func (m *MetricsManager) getKeyHistoricalStatsFromDailyStats(store *SQLiteStore,
 			OutputTokens:             agg.OutputTokens,
 			CacheCreationInputTokens: agg.CacheCreationTokens,
 			CacheReadInputTokens:     agg.CacheReadTokens,
+			CostCents:                agg.CostCents,
 		})
 	}
 
@@ -1698,11 +1711,12 @@ type keyBucketData struct {
 	outputTokens        int64
 	cacheCreationTokens int64
 	cacheReadTokens     int64
+	costCents           int64
 }
 
 // ============ 全局统计数据结构和方法（用于全局流量统计图表）============
 
-// GlobalHistoryDataPoint 全局历史数据点（含 Token 数据）
+// GlobalHistoryDataPoint 全局历史数据点（含 Token 和成本数据）
 type GlobalHistoryDataPoint struct {
 	Timestamp           time.Time `json:"timestamp"`
 	RequestCount        int64     `json:"requestCount"`
@@ -1713,6 +1727,7 @@ type GlobalHistoryDataPoint struct {
 	OutputTokens        int64     `json:"outputTokens"`
 	CacheCreationTokens int64     `json:"cacheCreationTokens"`
 	CacheReadTokens     int64     `json:"cacheReadTokens"`
+	CostCents           int64     `json:"costCents"` // 成本（美分）
 }
 
 // GlobalStatsSummary 全局统计汇总
@@ -1724,6 +1739,7 @@ type GlobalStatsSummary struct {
 	TotalOutputTokens        int64   `json:"totalOutputTokens"`
 	TotalCacheCreationTokens int64   `json:"totalCacheCreationTokens"`
 	TotalCacheReadTokens     int64   `json:"totalCacheReadTokens"`
+	TotalCostCents           int64   `json:"totalCostCents"` // 总成本（美分）
 	AvgSuccessRate           float64 `json:"avgSuccessRate"`
 	Duration                 string  `json:"duration"`
 }
@@ -1805,6 +1821,7 @@ func (m *MetricsManager) getGlobalHistoricalStatsWithTokensInMemory(duration, in
 	// 汇总统计
 	var totalRequests, totalSuccess, totalFailure int64
 	var totalInputTokens, totalOutputTokens, totalCacheCreation, totalCacheRead int64
+	var totalCostCents int64
 
 	// 遍历所有 Key 的请求历史
 	for _, metrics := range m.keyMetrics {
@@ -1824,6 +1841,7 @@ func (m *MetricsManager) getGlobalHistoricalStatsWithTokensInMemory(duration, in
 					b.outputTokens += record.OutputTokens
 					b.cacheCreationTokens += record.CacheCreationInputTokens
 					b.cacheReadTokens += record.CacheReadInputTokens
+					b.costCents += record.CostCents
 
 					// 累加汇总
 					totalRequests++
@@ -1836,6 +1854,7 @@ func (m *MetricsManager) getGlobalHistoricalStatsWithTokensInMemory(duration, in
 					totalOutputTokens += record.OutputTokens
 					totalCacheCreation += record.CacheCreationInputTokens
 					totalCacheRead += record.CacheReadInputTokens
+					totalCostCents += record.CostCents
 				}
 			}
 		}
@@ -1859,6 +1878,7 @@ func (m *MetricsManager) getGlobalHistoricalStatsWithTokensInMemory(duration, in
 			OutputTokens:        b.outputTokens,
 			CacheCreationTokens: b.cacheCreationTokens,
 			CacheReadTokens:     b.cacheReadTokens,
+			CostCents:           b.costCents,
 		}
 	}
 
@@ -1876,6 +1896,7 @@ func (m *MetricsManager) getGlobalHistoricalStatsWithTokensInMemory(duration, in
 		TotalOutputTokens:        totalOutputTokens,
 		TotalCacheCreationTokens: totalCacheCreation,
 		TotalCacheReadTokens:     totalCacheRead,
+		TotalCostCents:           totalCostCents,
 		AvgSuccessRate:           avgSuccessRate,
 		Duration:                 duration.String(),
 	}
@@ -1905,6 +1926,7 @@ func (m *MetricsManager) getGlobalHistoricalStatsWithTokensFromRequestRecords(st
 	dataPoints := make([]GlobalHistoryDataPoint, numPoints)
 	var totalRequests, totalSuccess, totalFailure int64
 	var totalInputTokens, totalOutputTokens, totalCacheCreation, totalCacheRead int64
+	var totalCostCents int64
 
 	for i := 0; i < numPoints; i++ {
 		agg := buckets[int64(i)]
@@ -1922,6 +1944,7 @@ func (m *MetricsManager) getGlobalHistoricalStatsWithTokensFromRequestRecords(st
 			OutputTokens:        agg.OutputTokens,
 			CacheCreationTokens: agg.CacheCreationTokens,
 			CacheReadTokens:     agg.CacheReadTokens,
+			CostCents:           agg.CostCents,
 		}
 
 		totalRequests += agg.RequestCount
@@ -1931,6 +1954,7 @@ func (m *MetricsManager) getGlobalHistoricalStatsWithTokensFromRequestRecords(st
 		totalOutputTokens += agg.OutputTokens
 		totalCacheCreation += agg.CacheCreationTokens
 		totalCacheRead += agg.CacheReadTokens
+		totalCostCents += agg.CostCents
 	}
 
 	avgSuccessRate := float64(0)
@@ -1946,6 +1970,7 @@ func (m *MetricsManager) getGlobalHistoricalStatsWithTokensFromRequestRecords(st
 		TotalOutputTokens:        totalOutputTokens,
 		TotalCacheCreationTokens: totalCacheCreation,
 		TotalCacheReadTokens:     totalCacheRead,
+		TotalCostCents:           totalCostCents,
 		AvgSuccessRate:           avgSuccessRate,
 		Duration:                 duration.String(),
 	}
@@ -1998,6 +2023,7 @@ func (m *MetricsManager) getGlobalHistoricalStatsWithTokensFromDailyStats(store 
 	dataPoints := make([]GlobalHistoryDataPoint, 0, 32)
 	var totalRequests, totalSuccess, totalFailure int64
 	var totalInputTokens, totalOutputTokens, totalCacheCreation, totalCacheRead int64
+	var totalCostCents int64
 
 	for dayStart := sinceDayStart; !dayStart.After(todayStart); dayStart = dayStart.AddDate(0, 0, 1) {
 		dayEnd := dayStart.AddDate(0, 0, 1)
@@ -2036,6 +2062,7 @@ func (m *MetricsManager) getGlobalHistoricalStatsWithTokensFromDailyStats(store 
 			OutputTokens:        agg.OutputTokens,
 			CacheCreationTokens: agg.CacheCreationTokens,
 			CacheReadTokens:     agg.CacheReadTokens,
+			CostCents:           agg.CostCents,
 		})
 
 		totalRequests += agg.RequestCount
@@ -2045,6 +2072,7 @@ func (m *MetricsManager) getGlobalHistoricalStatsWithTokensFromDailyStats(store 
 		totalOutputTokens += agg.OutputTokens
 		totalCacheCreation += agg.CacheCreationTokens
 		totalCacheRead += agg.CacheReadTokens
+		totalCostCents += agg.CostCents
 	}
 
 	avgSuccessRate := float64(0)
@@ -2060,6 +2088,7 @@ func (m *MetricsManager) getGlobalHistoricalStatsWithTokensFromDailyStats(store 
 		TotalOutputTokens:        totalOutputTokens,
 		TotalCacheCreationTokens: totalCacheCreation,
 		TotalCacheReadTokens:     totalCacheRead,
+		TotalCostCents:           totalCostCents,
 		AvgSuccessRate:           avgSuccessRate,
 		Duration:                 duration.String(),
 	}
@@ -2080,6 +2109,7 @@ type globalBucketData struct {
 	outputTokens        int64
 	cacheCreationTokens int64
 	cacheReadTokens     int64
+	costCents           int64 // 成本（美分）
 }
 
 // CalculateTodayDuration 计算"今日"时间范围（从今天 0 点到现在）

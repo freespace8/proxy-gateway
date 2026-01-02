@@ -21,6 +21,7 @@ import (
 	"github.com/BenedictKing/claude-proxy/internal/logger"
 	"github.com/BenedictKing/claude-proxy/internal/metrics"
 	"github.com/BenedictKing/claude-proxy/internal/middleware"
+	"github.com/BenedictKing/claude-proxy/internal/monitor"
 	"github.com/BenedictKing/claude-proxy/internal/pricing"
 	"github.com/BenedictKing/claude-proxy/internal/scheduler"
 	"github.com/BenedictKing/claude-proxy/internal/session"
@@ -133,28 +134,32 @@ func main() {
 	log.Printf("[Scheduler-Init] 多渠道调度器已初始化 (失败率阈值: %.0f%%, 滑动窗口: %d)",
 		messagesMetricsManager.GetFailureThreshold()*100, messagesMetricsManager.GetWindowSize())
 
+	// 实时请求监控
+	liveRequestManager := monitor.NewLiveRequestManager(50)
+
 	// 初始化计费相关组件
 	var billingClient *billing.Client
-	var billingHandler *billing.Handler
-	var pricingService *pricing.Service
 	var usageStore *usage.Store
+
+	// 价格表服务始终初始化（用于成本统计，即使不启用计费）
+	pricingInterval, err := time.ParseDuration(envCfg.PricingUpdateInterval)
+	if err != nil {
+		pricingInterval = 24 * time.Hour
+	}
+	pricingService := pricing.NewService(pricingInterval)
+	log.Printf("[Pricing-Init] 价格表服务已初始化 (更新间隔: %s)", pricingInterval)
 
 	if envCfg.IsBillingEnabled() {
 		billingClient = billing.NewClient(envCfg.SweAgentBillingURL)
 		log.Printf("[Billing-Init] 计费客户端已初始化: %s", envCfg.SweAgentBillingURL)
 
-		// 解析价格表更新间隔
-		pricingInterval, err := time.ParseDuration(envCfg.PricingUpdateInterval)
-		if err != nil {
-			pricingInterval = 24 * time.Hour
-		}
-		pricingService = pricing.NewService(pricingInterval)
-		log.Printf("[Pricing-Init] 价格表服务已初始化 (更新间隔: %s)", pricingInterval)
-
 		usageStore = usage.NewStore(10000)
 		log.Printf("[Usage-Init] 使用量存储已初始化")
+	}
 
-		billingHandler = billing.NewHandler(billingClient, pricingService, usageStore, envCfg.PreAuthAmountCents)
+	// billingHandler 始终创建（用于成本计算），但 client/usageStore 可能为 nil
+	billingHandler := billing.NewHandler(billingClient, pricingService, usageStore, envCfg.PreAuthAmountCents)
+	if envCfg.IsBillingEnabled() {
 		log.Printf("[Billing-Init] 计费处理器已初始化 (预授权: %d cents)", envCfg.PreAuthAmountCents)
 	}
 
@@ -185,6 +190,11 @@ func main() {
 	// Web 管理界面 API 路由
 	apiGroup := r.Group("/api")
 	{
+		// 子路由组（仅用于更清晰地挂载少量新路由；既有路由保持不动）
+		messagesAPI := apiGroup.Group("/messages")
+		responsesAPI := apiGroup.Group("/responses")
+		geminiAPI := apiGroup.Group("/gemini")
+
 		// Messages 渠道管理
 		apiGroup.GET("/messages/channels", messages.GetUpstreams(cfgManager))
 		apiGroup.POST("/messages/channels", messages.AddUpstream(cfgManager))
@@ -254,10 +264,23 @@ func main() {
 		// Fuzzy 模式设置
 		apiGroup.GET("/settings/fuzzy-mode", handlers.GetFuzzyMode(cfgManager))
 		apiGroup.PUT("/settings/fuzzy-mode", handlers.SetFuzzyMode(cfgManager))
+
+		// 请求日志 API
+		requestLogsHandler := handlers.NewRequestLogsHandler(metricsStore)
+		messagesAPI.GET("/logs", requestLogsHandler.GetLogs)
+		responsesAPI.GET("/logs", requestLogsHandler.GetLogs)
+		geminiAPI.GET("/logs", requestLogsHandler.GetLogs)
+
+		// 实时请求 API
+		liveRequestsHandler := handlers.NewLiveRequestsHandler(liveRequestManager)
+		messagesAPI.GET("/live", liveRequestsHandler.GetLiveRequests)
+		responsesAPI.GET("/live", liveRequestsHandler.GetLiveRequests)
+		geminiAPI.GET("/live", liveRequestsHandler.GetLiveRequests)
 	}
 
 	// 代理端点 - Messages API
-	r.POST("/v1/messages", messages.Handler(envCfg, cfgManager, channelScheduler, billingClient, billingHandler))
+	messagesHandler := messages.NewHandler(envCfg, cfgManager, channelScheduler, billingClient, billingHandler, liveRequestManager, metricsStore)
+	r.POST("/v1/messages", messagesHandler)
 	r.POST("/v1/messages/count_tokens", messages.CountTokensHandler(envCfg, cfgManager, channelScheduler))
 
 	// 代理端点 - Models API（转发到上游）
@@ -265,13 +288,15 @@ func main() {
 	r.GET("/v1/models/:model", messages.ModelsDetailHandler(envCfg, cfgManager, channelScheduler))
 
 	// 代理端点 - Responses API
-	r.POST("/v1/responses", responses.Handler(envCfg, cfgManager, sessionManager, channelScheduler, billingClient, billingHandler))
+	responsesHandler := responses.NewHandler(envCfg, cfgManager, sessionManager, channelScheduler, billingClient, billingHandler, liveRequestManager, metricsStore)
+	r.POST("/v1/responses", responsesHandler)
 	r.POST("/v1/responses/compact", responses.CompactHandler(envCfg, cfgManager, sessionManager, channelScheduler))
 
 	// 代理端点 - Gemini API (原生协议)
 	// 使用通配符捕获 model:action 格式，如 gemini-pro:generateContent
 	// 路径格式：/v1beta/models/{model}:generateContent (Gemini 原生格式)
-	r.POST("/v1beta/models/*modelAction", gemini.Handler(envCfg, cfgManager, channelScheduler))
+	geminiHandler := gemini.NewHandler(envCfg, cfgManager, channelScheduler, liveRequestManager, metricsStore)
+	r.POST("/v1beta/models/*modelAction", geminiHandler)
 
 	// 静态文件服务 (嵌入的前端)
 	if envCfg.EnableWebUI {

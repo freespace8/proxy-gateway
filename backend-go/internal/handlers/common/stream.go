@@ -509,7 +509,10 @@ func checkUsageFieldsWithPatch(usage interface{}) (bool, bool, bool) {
 			hasCacheTokens := cacheCreation > 0 || cacheRead > 0
 
 			if hasInput {
-				if v, ok := inputTokens.(float64); ok && v <= 1 && !hasCacheTokens {
+				if inputTokens == nil {
+					// input_tokens 为 nil 时需要修补
+					needInputPatch = true
+				} else if v, ok := inputTokens.(float64); ok && v <= 1 && !hasCacheTokens {
 					needInputPatch = true
 				}
 			}
@@ -665,6 +668,10 @@ func patchUsageFieldsWithLog(usage map[string]interface{}, estimatedInput, estim
 			usage["input_tokens"] = estimatedInput
 			inputPatched = true
 		}
+	} else if usage["input_tokens"] == nil && estimatedInput > 0 {
+		// input_tokens 为 nil 时，用收集到的值修补
+		usage["input_tokens"] = estimatedInput
+		inputPatched = true
 	}
 
 	if v, ok := usage["output_tokens"].(float64); ok {

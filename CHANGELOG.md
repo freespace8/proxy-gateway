@@ -6,6 +6,40 @@
 
 ## [Unreleased]
 
+### ✨ 新功能
+
+- **渠道级别 Cost 视图** - 在 KeyTrendChart 组件中新增 Cost 视图：
+  - 后端 `KeyHistoryDataPoint` 增加 `CostCents` 字段
+  - 前端支持按渠道查看成本趋势图
+  - 涉及文件：`backend-go/internal/metrics/channel_metrics.go`、`frontend/src/components/KeyTrendChart.vue`
+
+- **请求日志系统** - 持久化请求元数据，保留 24 小时：
+  - 新增 `request_logs` SQLite 表存储请求记录
+  - 记录字段：时间、耗时、状态码、模型、渠道、成本、Token、API Key 掩码、错误信息
+  - 新增 `GET /api/{messages|responses|gemini}/logs` 分页查询接口
+  - 自动清理超过 24 小时的日志
+  - 涉及文件：`backend-go/internal/metrics/request_log.go`、`backend-go/internal/metrics/sqlite_store.go`、`backend-go/internal/handlers/request_logs_handler.go`
+
+- **实时请求监控** - 内存中保留最近 50 条正在进行的请求：
+  - 新增 `LiveRequestManager` 管理进行中请求
+  - 请求完成后自动从内存清理
+  - 新增 `GET /api/{messages|responses|gemini}/live` 查询接口
+  - 涉及文件：`backend-go/internal/monitor/live_requests.go`、`backend-go/internal/handlers/live_requests_handler.go`
+
+- **请求监控页面** - 独立的请求监控页面：
+  - 支持 Messages/Responses/Gemini 三种 API 类型切换
+  - 上半区显示实时请求（2 秒刷新）
+  - 下半区显示请求日志列表（5 秒刷新，分页）
+  - 访问路径：`/monitor` 或点击右上角"请求监控"按钮
+  - 涉及文件：`frontend/src/views/RequestMonitorView.vue`、`frontend/src/components/RequestLogList.vue`、`frontend/src/components/LiveRequestMonitor.vue`
+
+- **渠道统计增加金额消耗视图** - 在全局统计图表中新增 Cost 视图，与 Token、Cache 视图并列展示：
+  - 后端数据结构增加 `model` 和 `costCents` 字段用于成本追踪
+  - SQLite 存储增加 `model` 和 `cost_cents` 列（支持旧数据库自动迁移）
+  - 前端 GlobalStatsChart 组件新增 Cost 视图，显示总消耗和平均成本
+  - 金额单位为美元，支持从美分自动格式化显示
+  - 涉及文件：`backend-go/internal/metrics/channel_metrics.go`、`backend-go/internal/metrics/sqlite_store.go`、`frontend/src/components/GlobalStatsChart.vue`
+
 ### ✅ 测试
 
 - **新增 billing handler 单元测试** - 提升计费模块测试覆盖率从 57.1% 到 86.7%：

@@ -220,6 +220,16 @@
                         </v-list-item-title>
 
                         <template v-slot:append>
+                          <v-btn
+                            size="small"
+                            color="primary"
+                            icon
+                            variant="text"
+                            @click="editModelMapping(source)"
+                            :disabled="editingModelMappingSource === source"
+                          >
+                            <v-icon size="small" color="primary">mdi-pencil</v-icon>
+                          </v-btn>
                           <v-btn size="small" color="error" icon variant="text" @click="removeModelMapping(source)">
                             <v-icon size="small" color="error">mdi-close</v-icon>
                           </v-btn>
@@ -232,7 +242,7 @@
                   <div class="d-flex align-center ga-2">
                     <v-combobox
                       v-model="newMapping.source"
-                      label="源模型名"
+                      :label="editingModelMappingSource ? '源模型名（编辑）' : '源模型名'"
                       :items="sourceModelOptions"
                       variant="outlined"
                       density="comfortable"
@@ -243,7 +253,7 @@
                     <v-icon color="primary">mdi-arrow-right</v-icon>
                     <v-text-field
                       v-model="newMapping.target"
-                      label="目标模型名"
+                      :label="editingModelMappingSource ? '目标模型名（编辑）' : '目标模型名'"
                       :placeholder="targetModelPlaceholder"
                       variant="outlined"
                       density="comfortable"
@@ -257,7 +267,15 @@
                       @click="addModelMapping"
                       :disabled="!newMapping.source.trim() || !newMapping.target.trim()"
                     >
-                      添加
+                      {{ editingModelMappingSource ? '保存' : '添加' }}
+                    </v-btn>
+                    <v-btn
+                      v-if="editingModelMappingSource"
+                      color="surface-variant"
+                      variant="text"
+                      @click="cancelEditModelMapping"
+                    >
+                      取消
                     </v-btn>
                   </div>
                 </v-card-text>
@@ -978,6 +996,7 @@ const newMapping = reactive({
   source: '',
   target: ''
 })
+const editingModelMappingSource = ref<string | null>(null)
 
 // 表单验证错误
 const errors = reactive({
@@ -1084,6 +1103,7 @@ const resetForm = () => {
   newApiKey.value = ''
   newMapping.source = ''
   newMapping.target = ''
+  editingModelMappingSource.value = null
 
   // 重置 baseUrlsText
   baseUrlsText.value = ''
@@ -1236,14 +1256,45 @@ const copyApiKey = async (key: string, index: number) => {
 const addModelMapping = () => {
   const source = newMapping.source.trim()
   const target = newMapping.target.trim()
-  if (source && target && !form.modelMapping[source]) {
+  if (!source || !target) return
+
+  // 编辑：允许覆盖、允许改 key
+  if (editingModelMappingSource.value) {
+    const originalSource = editingModelMappingSource.value
+    if (source !== originalSource) {
+      delete form.modelMapping[originalSource]
+    }
+    form.modelMapping[source] = target
+    editingModelMappingSource.value = null
+    newMapping.source = ''
+    newMapping.target = ''
+    return
+  }
+
+  // 新增：源模型已存在则不重复添加
+  if (!form.modelMapping[source]) {
     form.modelMapping[source] = target
     newMapping.source = ''
     newMapping.target = ''
   }
 }
 
+const editModelMapping = (source: string) => {
+  editingModelMappingSource.value = source
+  newMapping.source = source
+  newMapping.target = form.modelMapping[source] || ''
+}
+
+const cancelEditModelMapping = () => {
+  editingModelMappingSource.value = null
+  newMapping.source = ''
+  newMapping.target = ''
+}
+
 const removeModelMapping = (source: string) => {
+  if (editingModelMappingSource.value === source) {
+    cancelEditModelMapping()
+  }
   delete form.modelMapping[source]
 }
 

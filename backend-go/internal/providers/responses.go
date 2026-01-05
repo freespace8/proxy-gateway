@@ -52,6 +52,8 @@ func (p *ResponsesProvider) ConvertToProviderRequest(
 		if model, ok := reqMap["model"].(string); ok {
 			reqMap["model"] = config.RedirectModel(model, upstream)
 		}
+		// 兼容特定模型的字段约束（例如 gpt-5.2 不支持 reasoning.effort=minimal）
+		normalizeResponsesReasoningEffort(reqMap)
 
 		providerReq = reqMap
 	} else {
@@ -114,6 +116,27 @@ func (p *ResponsesProvider) ConvertToProviderRequest(
 	req.Header.Set("Content-Type", "application/json")
 
 	return req, bodyBytes, nil
+}
+
+func normalizeResponsesReasoningEffort(reqMap map[string]interface{}) {
+	// 目前仅针对 gpt-5.2：reasoning.effort 最小档需使用 low
+	model, ok := reqMap["model"].(string)
+	if !ok || model != "gpt-5.2" {
+		return
+	}
+
+	reasoning, ok := reqMap["reasoning"].(map[string]interface{})
+	if !ok || reasoning == nil {
+		return
+	}
+
+	effort, ok := reasoning["effort"].(string)
+	if !ok {
+		return
+	}
+	if effort == "minimal" {
+		reasoning["effort"] = "low"
+	}
 }
 
 // buildTargetURL 根据上游类型构建目标 URL

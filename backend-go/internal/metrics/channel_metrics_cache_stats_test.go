@@ -19,11 +19,11 @@ func TestToResponse_TimeWindowsIncludesCacheStats(t *testing.T) {
 		OutputTokens:             10,
 		CacheCreationInputTokens: 20,
 		CacheReadInputTokens:     50,
-	})
+	}, "m", 0)
 	m.RecordSuccessWithUsage(baseURL, key2, &types.Usage{
 		InputTokens:  200,
 		OutputTokens: 20,
-	})
+	}, "m", 0)
 
 	resp := m.ToResponse(0, baseURL, []string{key1, key2}, 0)
 	stats, ok := resp.TimeWindows["15m"]
@@ -64,7 +64,7 @@ func TestRecordSuccessWithUsage_CacheCreationFallbackFromTTLBreakdown(t *testing
 		CacheCreation5mInputTokens: 20,
 		CacheCreation1hInputTokens: 30,
 		CacheReadInputTokens:       50,
-	})
+	}, "m", 0)
 
 	resp := m.ToResponse(0, baseURL, []string{key}, 0)
 	stats, ok := resp.TimeWindows["15m"]

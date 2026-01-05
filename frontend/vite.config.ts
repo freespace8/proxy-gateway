@@ -8,7 +8,8 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
 
   const frontendPort = parseInt(env.VITE_FRONTEND_PORT || '5173')
-  const backendUrl = env.VITE_PROXY_TARGET || 'http://localhost:3000'
+  // 兼容历史配置：优先使用 VITE_BACKEND_URL（与 .env.example 一致），其次兼容 VITE_PROXY_TARGET
+  const backendUrl = env.VITE_BACKEND_URL || env.VITE_PROXY_TARGET || 'http://localhost:3000'
 
   return {
     // 使用绝对路径，适配 Go 嵌入式部署

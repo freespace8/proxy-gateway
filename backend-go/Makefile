@@ -49,6 +49,11 @@ dev:
 		echo "$(YELLOW)⚠️  Air 未安装，正在自动安装...$(NC)"; \
 		$(MAKE) install-air; \
 	fi
+	@# 开发模式下也需要保证 embed 目录存在，否则 go:embed 会直接编译失败
+	@mkdir -p frontend/dist
+	@if [ ! -e frontend/dist/index.html ]; then \
+		echo "<!doctype html><html><head><meta charset='utf-8'></head><body>dev placeholder</body></html>" > frontend/dist/index.html; \
+	fi
 	@echo "$(GREEN)🚀 启动开发模式 (热重载开启)$(NC)"
 	@echo "$(YELLOW)📝 监听文件变化: *.go, *.yaml, *.toml, *.env$(NC)"
 	@echo "$(YELLOW)🔄 修改代码后将自动重启...$(NC)"
@@ -58,6 +63,10 @@ dev:
 # 开发模式 - 使用系统环境变量
 dev-with-env:
 	@echo "$(GREEN)🚀 启动开发模式 (使用系统环境变量)$(NC)"
+	@mkdir -p frontend/dist
+	@if [ ! -e frontend/dist/index.html ]; then \
+		echo "<!doctype html><html><head><meta charset='utf-8'></head><body>dev placeholder</body></html>" > frontend/dist/index.html; \
+	fi
 	@ENV_MODE=development air
 
 # 构建生产版本

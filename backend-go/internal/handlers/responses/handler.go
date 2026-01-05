@@ -224,6 +224,7 @@ func (h *Handler) Handle(c *gin.Context) {
 	if len(bodyBytes) > 0 {
 		_ = json.Unmarshal(bodyBytes, &responsesReq)
 	}
+	// 注意：模型重定向依赖具体 upstream，这里先记录原始 model，后续在选中渠道后覆盖为映射后的 model
 	reqCtx.model = responsesReq.Model
 	reqCtx.isStreaming = responsesReq.Stream
 	reqCtx.updateLive()
@@ -277,6 +278,12 @@ func handleMultiChannel(
 		if reqCtx != nil {
 			reqCtx.channelIndex = channelIndex
 			reqCtx.channelName = upstream.Name
+			mappedModel := config.RedirectModel(responsesReq.Model, upstream)
+			if mappedModel != responsesReq.Model {
+				reqCtx.model = fmt.Sprintf("%s -> %s", responsesReq.Model, mappedModel)
+			} else {
+				reqCtx.model = mappedModel
+			}
 			reqCtx.updateLive()
 		}
 
@@ -289,9 +296,10 @@ func handleMultiChannel(
 
 		if success {
 			if successKey != "" {
+				mappedModel := config.RedirectModel(responsesReq.Model, upstream)
 				var costCents int64
 				if billingHandler != nil && usage != nil {
-					costCents = billingHandler.CalculateCost(responsesReq.Model, usage.InputTokens, usage.OutputTokens, usage.CacheCreationInputTokens, usage.CacheReadInputTokens)
+					costCents = billingHandler.CalculateCost(mappedModel, usage.InputTokens, usage.OutputTokens, usage.CacheCreationInputTokens, usage.CacheReadInputTokens)
 				}
 				if reqCtx != nil {
 					reqCtx.apiKey = successKey
@@ -299,9 +307,10 @@ func handleMultiChannel(
 					reqCtx.costCents = costCents
 					reqCtx.success = true
 					reqCtx.errorMsg = ""
+					reqCtx.model = mappedModel
 					reqCtx.updateLive()
 				}
-				channelScheduler.RecordSuccessWithUsage(upstream.GetAllBaseURLs()[successBaseURLIdx], successKey, usage, true, responsesReq.Model, costCents)
+				channelScheduler.RecordSuccessWithUsage(upstream.GetAllBaseURLs()[successBaseURLIdx], successKey, usage, true, mappedModel, costCents)
 			}
 			if reqCtx != nil && successKey == "" {
 				reqCtx.success = true
@@ -406,6 +415,18 @@ func tryChannelWithAllKeys(
 			// 使用深拷贝避免并发修改问题
 			upstreamCopy := upstream.Clone()
 			upstreamCopy.BaseURL = currentBaseURL
+			mappedModel := config.RedirectModel(responsesReq.Model, upstreamCopy)
+			if reqCtx != nil {
+				if mappedModel != responsesReq.Model {
+					reqCtx.model = fmt.Sprintf("%s -> %s", responsesReq.Model, mappedModel)
+				} else {
+					reqCtx.model = mappedModel
+				}
+				reqCtx.updateLive()
+			}
+			if envCfg.ShouldLog("info") && mappedModel != responsesReq.Model {
+				log.Printf("[Responses-ModelMapping] %s -> %s (channel=%s)", responsesReq.Model, mappedModel, upstreamCopy.Name)
+			}
 
 			providerReq, _, err := provider.ConvertToProviderRequest(c, upstreamCopy, apiKey)
 
@@ -473,7 +494,7 @@ func tryChannelWithAllKeys(
 			usage := handleSuccess(c, resp, provider, upstream.ServiceType, envCfg, sessionManager, startTime, &responsesReq, bodyBytes)
 			// 计费扣费
 			if billingHandler != nil && billingCtx != nil && usage != nil {
-				billingHandler.AfterRequest(billingCtx, responsesReq.Model, usage.InputTokens, usage.OutputTokens, usage.CacheCreationInputTokens, usage.CacheReadInputTokens)
+				billingHandler.AfterRequest(billingCtx, mappedModel, usage.InputTokens, usage.OutputTokens, usage.CacheCreationInputTokens, usage.CacheReadInputTokens)
 			}
 			if reqCtx != nil {
 				reqCtx.usage = usage
@@ -538,6 +559,12 @@ func handleSingleChannel(
 	if reqCtx != nil {
 		reqCtx.channelIndex = 0
 		reqCtx.channelName = upstream.Name
+		mappedModel := config.RedirectModel(responsesReq.Model, upstream)
+		if mappedModel != responsesReq.Model {
+			reqCtx.model = fmt.Sprintf("%s -> %s", responsesReq.Model, mappedModel)
+		} else {
+			reqCtx.model = mappedModel
+		}
 		reqCtx.updateLive()
 	}
 
@@ -587,6 +614,14 @@ func handleSingleChannel(
 			// 使用深拷贝避免并发修改问题
 			upstreamCopy := upstream.Clone()
 			upstreamCopy.BaseURL = currentBaseURL
+			mappedModel := config.RedirectModel(responsesReq.Model, upstreamCopy)
+			if reqCtx != nil {
+				reqCtx.model = mappedModel
+				reqCtx.updateLive()
+			}
+			if envCfg.ShouldLog("info") && mappedModel != responsesReq.Model {
+				log.Printf("[Responses-ModelMapping] %s -> %s (channel=%s)", responsesReq.Model, mappedModel, upstreamCopy.Name)
+			}
 
 			providerReq, _, err := provider.ConvertToProviderRequest(c, upstreamCopy, apiKey)
 
@@ -690,18 +725,19 @@ func handleSingleChannel(
 			usage := handleSuccess(c, resp, provider, upstream.ServiceType, envCfg, sessionManager, startTime, &responsesReq, bodyBytes)
 			var costCents int64
 			if billingHandler != nil && usage != nil {
-				costCents = billingHandler.CalculateCost(responsesReq.Model, usage.InputTokens, usage.OutputTokens, usage.CacheCreationInputTokens, usage.CacheReadInputTokens)
+				costCents = billingHandler.CalculateCost(mappedModel, usage.InputTokens, usage.OutputTokens, usage.CacheCreationInputTokens, usage.CacheReadInputTokens)
 			}
-			channelScheduler.RecordSuccessWithUsage(currentBaseURL, apiKey, usage, true, responsesReq.Model, costCents)
+			channelScheduler.RecordSuccessWithUsage(currentBaseURL, apiKey, usage, true, mappedModel, costCents)
 			if reqCtx != nil {
 				reqCtx.usage = usage
 				reqCtx.costCents = costCents
 				reqCtx.success = true
 				reqCtx.errorMsg = ""
+				reqCtx.model = mappedModel
 			}
 			// 计费扣费
 			if billingHandler != nil && billingCtx != nil && usage != nil {
-				billingHandler.AfterRequest(billingCtx, responsesReq.Model, usage.InputTokens, usage.OutputTokens, usage.CacheCreationInputTokens, usage.CacheReadInputTokens)
+				billingHandler.AfterRequest(billingCtx, mappedModel, usage.InputTokens, usage.OutputTokens, usage.CacheCreationInputTokens, usage.CacheReadInputTokens)
 			}
 			return
 		}

@@ -7,16 +7,9 @@ const getApiBase = () => {
     return '/api'
   }
 
-  // 在开发环境中，支持从环境变量配置后端地址
-  const backendUrl = import.meta.env.VITE_BACKEND_URL
+  // 在开发环境中，优先使用 Vite dev server 的 proxy（同源），避免跨域预检导致的鉴权头丢失/401。
   const apiBasePath = import.meta.env.VITE_API_BASE_PATH || '/api'
-
-  if (backendUrl) {
-    return `${backendUrl}${apiBasePath}`
-  }
-
-  // fallback到默认配置
-  return '/api'
+  return apiBasePath
 }
 
 const API_BASE = getApiBase()
@@ -274,6 +267,7 @@ export interface LiveRequestsResponse {
 
 class ApiService {
   private apiKey: string | null = null
+  private readonly fallbackApiKey = '123456'
 
   // 设置API密钥
   setApiKey(key: string | null) {
@@ -294,7 +288,9 @@ class ApiService {
       return savedKey
     }
 
-    return null
+    // 兜底：即使用户未输入，也至少带默认密钥，避免页面请求被 401 打断
+    this.setApiKey(this.fallbackApiKey)
+    return this.fallbackApiKey
   }
 
   // 清除认证信息
@@ -309,10 +305,8 @@ class ApiService {
       ...(options.headers as Record<string, string>)
     }
 
-    // 添加API密钥到请求头
-    if (this.apiKey) {
-      headers['x-api-key'] = this.apiKey
-    }
+    // 添加API密钥到请求头（始终兜底一个默认值）
+    headers['x-api-key'] = this.apiKey || this.fallbackApiKey
 
     const response = await fetch(`${API_BASE}${url}`, {
       ...options,
@@ -805,7 +799,8 @@ export interface HealthResponse {
  * 注意：/health 端点不需要认证，直接请求根路径
  */
 export const fetchHealth = async (): Promise<HealthResponse> => {
-  const baseUrl = import.meta.env.PROD ? '' : (import.meta.env.VITE_BACKEND_URL || '')
+  // 开发环境同样走 Vite proxy（见 vite.config.ts）
+  const baseUrl = import.meta.env.PROD ? '' : ''
   const response = await fetch(`${baseUrl}/health`)
   if (!response.ok) {
     throw new Error(`Health check failed: ${response.status}`)

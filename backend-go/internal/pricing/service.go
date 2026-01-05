@@ -3,13 +3,48 @@ package pricing
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 )
 
 const LiteLLMPricingURL = "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"
+
+type jsonInt int
+
+func (i *jsonInt) UnmarshalJSON(data []byte) error {
+	// number
+	var n int
+	if err := json.Unmarshal(data, &n); err == nil {
+		*i = jsonInt(n)
+		return nil
+	}
+
+	// string
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		if s == "" {
+			*i = 0
+			return nil
+		}
+		n64, err := strconv.ParseInt(s, 10, 32)
+		if err != nil {
+			return fmt.Errorf("invalid int string %q: %w", s, err)
+		}
+		*i = jsonInt(int(n64))
+		return nil
+	}
+
+	// null / other
+	if string(data) == "null" {
+		*i = 0
+		return nil
+	}
+	return fmt.Errorf("invalid int json: %s", string(data))
+}
 
 // ModelPricing LiteLLM 模型价格信息
 type ModelPricing struct {
@@ -17,9 +52,9 @@ type ModelPricing struct {
 	OutputCostPerToken          float64 `json:"output_cost_per_token"`
 	CacheCreationInputTokenCost float64 `json:"cache_creation_input_token_cost"`
 	CacheReadInputTokenCost     float64 `json:"cache_read_input_token_cost"`
-	MaxTokens                   int     `json:"max_tokens"`
-	MaxInputTokens              int     `json:"max_input_tokens"`
-	MaxOutputTokens             int     `json:"max_output_tokens"`
+	MaxTokens                   jsonInt `json:"max_tokens"`
+	MaxInputTokens              jsonInt `json:"max_input_tokens"`
+	MaxOutputTokens             jsonInt `json:"max_output_tokens"`
 	LiteLLMProvider             string  `json:"litellm_provider"`
 	Mode                        string  `json:"mode"`
 }

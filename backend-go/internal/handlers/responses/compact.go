@@ -154,7 +154,7 @@ func handleMultiChannelCompact(
 		if success {
 			// compact 不产生 usage，但仍需记录成功以更新熔断器/权重
 			if successKey != "" {
-				channelScheduler.RecordSuccessWithUsage(upstream.BaseURL, successKey, nil, true)
+				channelScheduler.RecordSuccessWithUsage(upstream.BaseURL, successKey, nil, true, "", 0)
 			}
 			channelScheduler.SetTraceAffinity(userID, channelIndex)
 			return

@@ -214,6 +214,7 @@ func (h *Handler) Handle(c *gin.Context) {
 	if len(bodyBytes) > 0 {
 		_ = json.Unmarshal(bodyBytes, &claudeReq)
 	}
+	// 注意：模型重定向依赖具体 upstream，这里先记录原始 model，后续在选中渠道后覆盖为映射后的 model
 	reqCtx.model = claudeReq.Model
 	reqCtx.isStreaming = claudeReq.Stream
 	reqCtx.updateLive()
@@ -266,6 +267,12 @@ func handleMultiChannel(
 		if reqCtx != nil {
 			reqCtx.channelIndex = channelIndex
 			reqCtx.channelName = upstream.Name
+			mappedModel := config.RedirectModel(claudeReq.Model, upstream)
+			if mappedModel != claudeReq.Model {
+				reqCtx.model = fmt.Sprintf("%s -> %s", claudeReq.Model, mappedModel)
+			} else {
+				reqCtx.model = mappedModel
+			}
 			reqCtx.updateLive()
 		}
 
@@ -277,6 +284,9 @@ func handleMultiChannel(
 		success, successKey, successBaseURLIdx, failoverErr := tryChannelWithAllKeys(c, envCfg, cfgManager, channelScheduler, upstream, channelIndex, bodyBytes, claudeReq, startTime, billingHandler, billingCtx, reqCtx)
 
 		if success {
+			if successKey != "" {
+				channelScheduler.RecordSuccess(upstream.GetAllBaseURLs()[successBaseURLIdx], successKey, false)
+			}
 			channelScheduler.SetTraceAffinity(userID, channelIndex)
 			return
 		}
@@ -379,6 +389,18 @@ func tryChannelWithAllKeys(
 			// 使用深拷贝避免并发修改问题
 			upstreamCopy := upstream.Clone()
 			upstreamCopy.BaseURL = currentBaseURL
+			mappedModel := config.RedirectModel(claudeReq.Model, upstreamCopy)
+			if reqCtx != nil {
+				if mappedModel != claudeReq.Model {
+					reqCtx.model = fmt.Sprintf("%s -> %s", claudeReq.Model, mappedModel)
+				} else {
+					reqCtx.model = mappedModel
+				}
+				reqCtx.updateLive()
+			}
+			if envCfg.ShouldLog("info") && mappedModel != claudeReq.Model {
+				log.Printf("[Messages-ModelMapping] %s -> %s (channel=%s)", claudeReq.Model, mappedModel, upstreamCopy.Name)
+			}
 
 			providerReq, _, err := provider.ConvertToProviderRequest(c, upstreamCopy, apiKey)
 
@@ -461,7 +483,7 @@ func tryChannelWithAllKeys(
 			channelScheduler.MarkURLSuccess(channelIndex, currentBaseURL)
 
 			if claudeReq.Stream {
-				usage, costCents, streamErr := common.HandleStreamResponse(c, resp, provider, envCfg, startTime, upstreamCopy, bodyBytes, channelScheduler, apiKey, billingHandler, billingCtx, claudeReq.Model, claudeReq.Model)
+				usage, costCents, streamErr := common.HandleStreamResponse(c, resp, provider, envCfg, startTime, upstreamCopy, bodyBytes, channelScheduler, apiKey, billingHandler, billingCtx, mappedModel, claudeReq.Model)
 				if reqCtx != nil {
 					reqCtx.usage = usage
 					reqCtx.costCents = costCents
@@ -471,7 +493,7 @@ func tryChannelWithAllKeys(
 					}
 				}
 			} else {
-				handleNormalResponse(c, resp, provider, envCfg, startTime, bodyBytes, channelScheduler, upstreamCopy, apiKey, billingHandler, billingCtx, claudeReq.Model, reqCtx)
+				handleNormalResponse(c, resp, provider, envCfg, startTime, bodyBytes, channelScheduler, upstreamCopy, apiKey, billingHandler, billingCtx, mappedModel, reqCtx)
 			}
 			return true, apiKey, originalIdx, nil
 		}
@@ -541,6 +563,12 @@ func handleSingleChannel(
 	if reqCtx != nil {
 		reqCtx.channelIndex = 0
 		reqCtx.channelName = upstream.Name
+		mappedModel := config.RedirectModel(claudeReq.Model, upstream)
+		if mappedModel != claudeReq.Model {
+			reqCtx.model = fmt.Sprintf("%s -> %s", claudeReq.Model, mappedModel)
+		} else {
+			reqCtx.model = mappedModel
+		}
 		reqCtx.updateLive()
 	}
 
@@ -590,6 +618,18 @@ func handleSingleChannel(
 			// 使用深拷贝避免并发修改问题
 			upstreamCopy := upstream.Clone()
 			upstreamCopy.BaseURL = currentBaseURL
+			mappedModel := config.RedirectModel(claudeReq.Model, upstreamCopy)
+			if reqCtx != nil {
+				if mappedModel != claudeReq.Model {
+					reqCtx.model = fmt.Sprintf("%s -> %s", claudeReq.Model, mappedModel)
+				} else {
+					reqCtx.model = mappedModel
+				}
+				reqCtx.updateLive()
+			}
+			if envCfg.ShouldLog("info") && mappedModel != claudeReq.Model {
+				log.Printf("[Messages-ModelMapping] %s -> %s (channel=%s)", claudeReq.Model, mappedModel, upstreamCopy.Name)
+			}
 
 			providerReq, _, err := provider.ConvertToProviderRequest(c, upstreamCopy, apiKey)
 
@@ -694,7 +734,7 @@ func handleSingleChannel(
 			}
 
 			if claudeReq.Stream {
-				usage, costCents, streamErr := common.HandleStreamResponse(c, resp, provider, envCfg, startTime, upstreamCopy, bodyBytes, channelScheduler, apiKey, billingHandler, billingCtx, claudeReq.Model, claudeReq.Model)
+				usage, costCents, streamErr := common.HandleStreamResponse(c, resp, provider, envCfg, startTime, upstreamCopy, bodyBytes, channelScheduler, apiKey, billingHandler, billingCtx, mappedModel, claudeReq.Model)
 				if reqCtx != nil {
 					reqCtx.usage = usage
 					reqCtx.costCents = costCents
@@ -704,7 +744,7 @@ func handleSingleChannel(
 					}
 				}
 			} else {
-				handleNormalResponse(c, resp, provider, envCfg, startTime, bodyBytes, channelScheduler, upstreamCopy, apiKey, billingHandler, billingCtx, claudeReq.Model, reqCtx)
+				handleNormalResponse(c, resp, provider, envCfg, startTime, bodyBytes, channelScheduler, upstreamCopy, apiKey, billingHandler, billingCtx, mappedModel, reqCtx)
 			}
 			return
 		}

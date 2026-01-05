@@ -12,7 +12,7 @@ services:
     container_name: claude-proxy
     ports:
       # 统一端口：前端界面 + API + 管理接口
-      - '23001:3000'
+      - '2010:3000'
     volumes:
       # 配置目录持久化
       - ./.config:/app/.config
@@ -20,17 +20,17 @@ services:
       # - ./logs:/app/logs
     environment:
       # 基础配置
-      - ENV=production
+      - ENV=development
       # 是否启用Web管理界面 (true=一体化模式, false=纯API模式)
       - ENABLE_WEB_UI=true
       # 代理访问密钥 - 用于验证客户端对代理服务器的访问权限
       - PROXY_ACCESS_KEY=123456
       # 日志级别 (error, warn, info, debug)
-      - LOG_LEVEL=warn
+      - LOG_LEVEL=debug
       # 是否启用请求日志
       - ENABLE_REQUEST_LOGS=false
       # 是否启用响应日志
-      - ENABLE_RESPONSE_LOGS=false
+      - ENABLE_RESPONSE_LOGS=true
     # 健康检查配置
     healthcheck:
       test: ['CMD', 'wget', '--no-verbose', '--tries=1', '--spider', 'http://localhost:3000/health']

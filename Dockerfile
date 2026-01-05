@@ -4,7 +4,12 @@ FROM node:22-alpine AS frontend-builder
 WORKDIR /src/frontend
 
 COPY frontend/package*.json ./
-RUN npm ci
+# 若仓库未提交 lockfile，则回退到 npm install（避免 npm ci 直接失败）
+RUN if [ -f package-lock.json ] || [ -f npm-shrinkwrap.json ]; then \
+      npm ci; \
+    else \
+      npm install --no-audit --no-fund; \
+    fi
 
 COPY frontend/ ./
 RUN npm run build

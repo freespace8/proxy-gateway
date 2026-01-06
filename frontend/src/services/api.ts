@@ -452,6 +452,14 @@ class ApiService {
     })
   }
 
+  async pingResponsesChannel(id: number): Promise<PingResult> {
+    return this.request(`/responses/ping/${id}`)
+  }
+
+  async pingAllResponsesChannels(): Promise<Array<{ id: number; name: string; latency: number; status: string }>> {
+    return this.request('/responses/ping')
+  }
+
   // ============== 多渠道调度 API ==============
 
   // 重新排序渠道优先级

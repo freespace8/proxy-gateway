@@ -2,10 +2,14 @@
 package responses
 
 import (
+	"net/http"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/BenedictKing/claude-proxy/internal/config"
+	"github.com/BenedictKing/claude-proxy/internal/httpclient"
 	"github.com/BenedictKing/claude-proxy/internal/scheduler"
 	"github.com/gin-gonic/gin"
 )
@@ -293,5 +297,139 @@ func SetChannelStatus(cfgManager *config.ConfigManager) gin.HandlerFunc {
 			"message": "Responses 渠道状态已更新",
 			"status":  req.Status,
 		})
+	}
+}
+
+// PingChannel Ping单个 Responses 渠道
+func PingChannel(cfgManager *config.ConfigManager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		idStr := c.Param("id")
+		id, err := strconv.Atoi(idStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid channel ID"})
+			return
+		}
+
+		cfg := cfgManager.GetConfig()
+		if id < 0 || id >= len(cfg.ResponsesUpstream) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Channel not found"})
+			return
+		}
+
+		channel := cfg.ResponsesUpstream[id]
+		result := pingChannelURLs(&channel)
+		c.JSON(http.StatusOK, result)
+	}
+}
+
+// pingChannelURLs 测试渠道的所有 BaseURL，返回最快的延迟
+func pingChannelURLs(ch *config.UpstreamConfig) gin.H {
+	urls := ch.GetAllBaseURLs()
+	if len(urls) == 0 {
+		return gin.H{"success": false, "latency": 0, "status": "error", "error": "no_base_url"}
+	}
+
+	if len(urls) == 1 {
+		return pingURL(urls[0], ch.InsecureSkipVerify)
+	}
+
+	type pingResult struct {
+		url     string
+		latency int64
+		success bool
+		err     string
+	}
+
+	results := make(chan pingResult, len(urls))
+	for _, url := range urls {
+		go func(testURL string) {
+			startTime := time.Now()
+			testURL = strings.TrimSuffix(testURL, "/")
+			client := httpclient.GetManager().GetStandardClient(5*time.Second, ch.InsecureSkipVerify)
+			req, err := http.NewRequest("HEAD", testURL, nil)
+			if err != nil {
+				results <- pingResult{url: testURL, latency: 0, success: false, err: "req_creation_failed"}
+				return
+			}
+			resp, err := client.Do(req)
+			latency := time.Since(startTime).Milliseconds()
+			if err != nil {
+				results <- pingResult{url: testURL, latency: latency, success: false, err: err.Error()}
+				return
+			}
+			resp.Body.Close()
+			results <- pingResult{url: testURL, latency: latency, success: true}
+		}(url)
+	}
+
+	var bestResult *pingResult
+	for i := 0; i < len(urls); i++ {
+		r := <-results
+		if r.success {
+			if bestResult == nil || !bestResult.success || r.latency < bestResult.latency {
+				bestResult = &r
+			}
+		} else if bestResult == nil || !bestResult.success {
+			bestResult = &r
+		}
+	}
+
+	if bestResult == nil {
+		return gin.H{"success": false, "latency": 0, "status": "error", "error": "all_urls_failed"}
+	}
+
+	if bestResult.success {
+		return gin.H{"success": true, "latency": bestResult.latency, "status": "healthy"}
+	}
+	return gin.H{"success": false, "latency": bestResult.latency, "status": "error", "error": bestResult.err}
+}
+
+// pingURL 测试单个 URL
+func pingURL(testURL string, insecureSkipVerify bool) gin.H {
+	startTime := time.Now()
+	testURL = strings.TrimSuffix(testURL, "/")
+	client := httpclient.GetManager().GetStandardClient(5*time.Second, insecureSkipVerify)
+	req, err := http.NewRequest("HEAD", testURL, nil)
+	if err != nil {
+		return gin.H{"success": false, "latency": 0, "status": "error", "error": "req_creation_failed"}
+	}
+	resp, err := client.Do(req)
+	latency := time.Since(startTime).Milliseconds()
+	if err != nil {
+		return gin.H{"success": false, "latency": latency, "status": "error", "error": err.Error()}
+	}
+	resp.Body.Close()
+	return gin.H{"success": true, "latency": latency, "status": "healthy"}
+}
+
+// PingAllChannels Ping所有 Responses 渠道
+func PingAllChannels(cfgManager *config.ConfigManager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cfg := cfgManager.GetConfig()
+		results := make(chan gin.H)
+		var wg sync.WaitGroup
+
+		for i, channel := range cfg.ResponsesUpstream {
+			wg.Add(1)
+			go func(id int, ch config.UpstreamConfig) {
+				defer wg.Done()
+				result := pingChannelURLs(&ch)
+				result["id"] = id
+				result["name"] = ch.Name
+				results <- result
+			}(i, channel)
+		}
+
+		go func() {
+			wg.Wait()
+			close(results)
+		}()
+
+		var finalResults []gin.H
+		for res := range results {
+			finalResults = append(finalResults, res)
+		}
+
+		c.JSON(http.StatusOK, finalResults)
 	}
 }

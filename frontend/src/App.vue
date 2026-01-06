@@ -782,7 +782,9 @@ const pingChannel = async (channelId: number) => {
   try {
     const result = activeTab.value === 'gemini'
       ? await api.pingGeminiChannel(channelId)
-      : await api.pingChannel(channelId)
+      : activeTab.value === 'responses'
+        ? await api.pingResponsesChannel(channelId)
+        : await api.pingChannel(channelId)
     const data = activeTab.value === 'gemini'
       ? geminiChannelsData.value
       : (activeTab.value === 'messages' ? channelsData.value : responsesChannelsData.value)
@@ -805,7 +807,9 @@ const pingAllChannels = async () => {
   try {
     const results = activeTab.value === 'gemini'
       ? await api.pingAllGeminiChannels()
-      : await api.pingAllChannels()
+      : activeTab.value === 'responses'
+        ? await api.pingAllResponsesChannels()
+        : await api.pingAllChannels()
     const data = activeTab.value === 'gemini'
       ? geminiChannelsData.value
       : (activeTab.value === 'messages' ? channelsData.value : responsesChannelsData.value)

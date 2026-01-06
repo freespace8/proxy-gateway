@@ -224,6 +224,78 @@ func TestNonPromotedChannelStillChecksHealth(t *testing.T) {
 	}
 }
 
+func TestSelectSlot_StickyByUserID(t *testing.T) {
+	cfg := config.Config{
+		Upstream: []config.UpstreamConfig{
+			{
+				Name:     "ch1",
+				BaseURL:  "https://c1.example.com",
+				APIKeys:  []string{"k1a", "k1b", "k1c"},
+				Status:   "active",
+				Priority: 1,
+			},
+			{
+				Name:     "ch2",
+				BaseURL:  "https://c2.example.com",
+				APIKeys:  []string{"k2a"},
+				Status:   "active",
+				Priority: 2,
+			},
+		},
+	}
+
+	scheduler, cleanup := createTestScheduler(t, cfg)
+	defer cleanup()
+
+	if !scheduler.IsMultiSlotMode(false) {
+		t.Fatalf("expected multi slot mode")
+	}
+
+	userID := "pc-123"
+	got1, err := scheduler.SelectSlot(context.Background(), userID, map[string]bool{}, false)
+	if err != nil {
+		t.Fatalf("SelectSlot err: %v", err)
+	}
+	got2, err := scheduler.SelectSlot(context.Background(), userID, map[string]bool{}, false)
+	if err != nil {
+		t.Fatalf("SelectSlot err: %v", err)
+	}
+	if got1.ChannelIndex != got2.ChannelIndex || got1.KeyIndex != got2.KeyIndex || got1.APIKey != got2.APIKey {
+		t.Fatalf("slot not sticky: got1=%+v got2=%+v", *got1, *got2)
+	}
+}
+
+func TestSelectSlot_RespectsTraceAffinitySlot(t *testing.T) {
+	cfg := config.Config{
+		Upstream: []config.UpstreamConfig{
+			{
+				Name:     "ch1",
+				BaseURL:  "https://c1.example.com",
+				APIKeys:  []string{"k1a", "k1b"},
+				Status:   "active",
+				Priority: 1,
+			},
+		},
+	}
+
+	scheduler, cleanup := createTestScheduler(t, cfg)
+	defer cleanup()
+
+	userID := "pc-456"
+	scheduler.traceAffinity.SetPreferredSlot(userID, 0, 1)
+
+	got, err := scheduler.SelectSlot(context.Background(), userID, map[string]bool{}, false)
+	if err != nil {
+		t.Fatalf("SelectSlot err: %v", err)
+	}
+	if got.ChannelIndex != 0 || got.KeyIndex != 1 || got.APIKey != "k1b" {
+		t.Fatalf("unexpected slot: %+v", *got)
+	}
+	if got.Reason != "trace_affinity" {
+		t.Fatalf("reason=%s want trace_affinity", got.Reason)
+	}
+}
+
 // TestExpiredPromotionNotBypassHealthCheck 测试过期的促销不绕过健康检查
 func TestExpiredPromotionNotBypassHealthCheck(t *testing.T) {
 	// 设置促销截止时间为过去

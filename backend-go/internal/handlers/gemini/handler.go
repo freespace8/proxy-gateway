@@ -232,10 +232,10 @@ func (h *Handler) Handle(c *gin.Context) {
 	// 记录原始请求信息
 	common.LogOriginalRequest(c, bodyBytes, envCfg, "Gemini")
 
-	// 检查是否为多渠道模式
-	isMultiChannel := channelScheduler.IsMultiChannelModeGemini()
+	// 多槽位模式：(渠道,key) 同层级负载均衡，并按 prompt_cache_key 做粘性
+	isMultiSlot := channelScheduler.IsMultiSlotModeGemini()
 
-	if isMultiChannel {
+	if isMultiSlot {
 		handleMultiChannel(c, envCfg, cfgManager, channelScheduler, bodyBytes, &geminiReq, model, isStream, userID, startTime, reqCtx)
 	} else {
 		handleSingleChannel(c, envCfg, cfgManager, channelScheduler, bodyBytes, &geminiReq, model, isStream, startTime, reqCtx)
@@ -269,7 +269,7 @@ func extractModelName(param string) string {
 	return param
 }
 
-// handleMultiChannel 处理多渠道 Gemini 请求
+// handleMultiChannel 处理多槽位 Gemini 请求（(渠道,key) 扁平化）
 func handleMultiChannel(
 	c *gin.Context,
 	envCfg *config.EnvConfig,
@@ -283,14 +283,14 @@ func handleMultiChannel(
 	startTime time.Time,
 	reqCtx *requestLogContext,
 ) {
-	failedChannels := make(map[int]bool)
+	failedSlots := make(map[string]bool)
 	var lastError error
 	var lastFailoverError *common.FailoverError
 
-	maxChannelAttempts := channelScheduler.GetActiveGeminiChannelCount()
+	maxSlotAttempts := channelScheduler.GetActiveGeminiSlotCount()
 
-	for channelAttempt := 0; channelAttempt < maxChannelAttempts; channelAttempt++ {
-		selection, err := channelScheduler.SelectGeminiChannel(c.Request.Context(), userID, failedChannels)
+	for slotAttempt := 0; slotAttempt < maxSlotAttempts; slotAttempt++ {
+		selection, err := channelScheduler.SelectGeminiSlot(c.Request.Context(), userID, failedSlots)
 		if err != nil {
 			lastError = err
 			break
@@ -305,12 +305,14 @@ func handleMultiChannel(
 		}
 
 		if envCfg.ShouldLog("info") {
-			log.Printf("[Gemini-Select] 选择渠道: [%d] %s (原因: %s, 尝试 %d/%d)",
-				channelIndex, upstream.Name, selection.Reason, channelAttempt+1, maxChannelAttempts)
+			log.Printf("[Gemini-Select] 选择槽位: [%d] %s (原因: %s, 尝试 %d/%d)",
+				channelIndex, upstream.Name, selection.Reason, slotAttempt+1, maxSlotAttempts)
 		}
 
+		upstreamOneKey := upstream.Clone()
+		upstreamOneKey.APIKeys = []string{selection.APIKey}
 		success, successKey, successBaseURLIdx, failoverErr, usage := tryChannelWithAllKeys(
-			c, envCfg, cfgManager, channelScheduler, upstream, channelIndex,
+			c, envCfg, cfgManager, channelScheduler, upstreamOneKey, channelIndex,
 			bodyBytes, geminiReq, model, isStream, startTime,
 			reqCtx,
 		)
@@ -324,24 +326,24 @@ func handleMultiChannel(
 					reqCtx.errorMsg = ""
 					reqCtx.updateLive()
 				}
-				channelScheduler.RecordGeminiSuccessWithUsage(upstream.GetAllBaseURLs()[successBaseURLIdx], successKey, usage, model, 0)
+				channelScheduler.RecordGeminiSuccessWithUsage(upstreamOneKey.GetAllBaseURLs()[successBaseURLIdx], successKey, usage, model, 0)
 			}
 			if reqCtx != nil && successKey == "" {
 				reqCtx.success = true
 				reqCtx.errorMsg = ""
 			}
-			channelScheduler.SetTraceAffinity(userID, channelIndex)
+			channelScheduler.SetTraceAffinitySlot(userID, channelIndex, selection.KeyIndex)
 			return
 		}
 
-		failedChannels[channelIndex] = true
+		failedSlots[fmt.Sprintf("%d:%s", channelIndex, selection.APIKey)] = true
 
 		if failoverErr != nil {
 			lastFailoverError = failoverErr
-			lastError = fmt.Errorf("渠道 [%d] %s 失败", channelIndex, upstream.Name)
+			lastError = fmt.Errorf("槽位 [%d] %s 失败", channelIndex, upstream.Name)
 		}
 
-		log.Printf("[Gemini-Failover] 警告: 渠道 [%d] %s 所有密钥都失败，尝试下一个渠道", channelIndex, upstream.Name)
+		log.Printf("[Gemini-Failover] 警告: 槽位 [%d] %s key=%s 失败，尝试下一个槽位", channelIndex, upstream.Name, utils.MaskAPIKey(selection.APIKey))
 	}
 
 	log.Printf("[Gemini-Error] 所有渠道都失败了")

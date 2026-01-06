@@ -8,6 +8,7 @@ import (
 // TraceAffinity 记录 trace 与渠道的亲和关系
 type TraceAffinity struct {
 	ChannelIndex int
+	KeyIndex     int
 	LastUsedAt   time.Time
 }
 
@@ -73,6 +74,29 @@ func (m *TraceAffinityManager) GetPreferredChannel(userID string) (int, bool) {
 	return affinity.ChannelIndex, true
 }
 
+// GetPreferredSlot 获取 user_id 偏好的槽位（渠道+Key）
+// 返回渠道索引、Key 索引和是否存在
+func (m *TraceAffinityManager) GetPreferredSlot(userID string) (int, int, bool) {
+	if userID == "" {
+		return -1, -1, false
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	affinity, exists := m.affinity[userID]
+	if !exists {
+		return -1, -1, false
+	}
+
+	if time.Since(affinity.LastUsedAt) > m.ttl {
+		return -1, -1, false
+	}
+
+	// 兼容旧记录：KeyIndex 未设置时返回 -1
+	return affinity.ChannelIndex, affinity.KeyIndex, true
+}
+
 // SetPreferredChannel 设置 user_id 偏好的渠道
 func (m *TraceAffinityManager) SetPreferredChannel(userID string, channelIndex int) {
 	if userID == "" {
@@ -84,6 +108,23 @@ func (m *TraceAffinityManager) SetPreferredChannel(userID string, channelIndex i
 
 	m.affinity[userID] = &TraceAffinity{
 		ChannelIndex: channelIndex,
+		KeyIndex:     -1,
+		LastUsedAt:   time.Now(),
+	}
+}
+
+// SetPreferredSlot 设置 user_id 偏好的槽位（渠道+Key）
+func (m *TraceAffinityManager) SetPreferredSlot(userID string, channelIndex int, keyIndex int) {
+	if userID == "" {
+		return
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.affinity[userID] = &TraceAffinity{
+		ChannelIndex: channelIndex,
+		KeyIndex:     keyIndex,
 		LastUsedAt:   time.Now(),
 	}
 }

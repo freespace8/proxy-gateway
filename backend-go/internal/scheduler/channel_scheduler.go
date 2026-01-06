@@ -3,8 +3,10 @@ package scheduler
 import (
 	"context"
 	"fmt"
+	"hash/fnv"
 	"log"
 	"sort"
+	"strconv"
 	"sync"
 
 	"github.com/BenedictKing/claude-proxy/internal/config"
@@ -57,6 +59,195 @@ type SelectionResult struct {
 	Upstream     *config.UpstreamConfig
 	ChannelIndex int
 	Reason       string // 选择原因（用于日志）
+}
+
+// SlotSelectionResult 槽位选择结果（渠道+Key）
+type SlotSelectionResult struct {
+	Upstream     *config.UpstreamConfig
+	ChannelIndex int
+	KeyIndex     int
+	APIKey       string
+	Reason       string
+}
+
+type slotCandidate struct {
+	channelIndex int
+	keyIndex     int
+	apiKey       string
+	upstream     *config.UpstreamConfig
+	channel      ChannelInfo
+}
+
+func slotID(channelIndex int, apiKey string) string {
+	return strconv.Itoa(channelIndex) + ":" + apiKey
+}
+
+func hash64(s string) uint64 {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(s))
+	return h.Sum64()
+}
+
+// SelectSlot 选择最佳槽位（渠道+Key）
+// 优先级: 促销期渠道 > Trace亲和（促销渠道失败时回退） > Rendezvous Hash（稳定映射）
+func (s *ChannelScheduler) SelectSlot(
+	ctx context.Context,
+	userID string,
+	failedSlots map[string]bool,
+	isResponses bool,
+) (*SlotSelectionResult, error) {
+	_ = ctx
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	activeChannels := s.getActiveChannels(isResponses)
+	if len(activeChannels) == 0 {
+		return nil, fmt.Errorf("没有可用的活跃渠道")
+	}
+
+	metricsManager := s.getMetricsManager(isResponses)
+
+	buildSlots := func(channels []ChannelInfo) (healthy []slotCandidate, all []slotCandidate) {
+		for _, ch := range channels {
+			if ch.Status != "active" {
+				continue
+			}
+			upstream := s.getUpstreamByIndex(ch.Index, isResponses)
+			if upstream == nil || len(upstream.APIKeys) == 0 {
+				continue
+			}
+			for keyIndex, apiKey := range upstream.APIKeys {
+				if apiKey == "" {
+					continue
+				}
+				if failedSlots != nil && failedSlots[slotID(ch.Index, apiKey)] {
+					continue
+				}
+				if s.configManager != nil && s.configManager.IsKeyFailed(apiKey) {
+					continue
+				}
+				all = append(all, slotCandidate{
+					channelIndex: ch.Index,
+					keyIndex:     keyIndex,
+					apiKey:       apiKey,
+					upstream:     upstream,
+					channel:      ch,
+				})
+				if metricsManager == nil || metricsManager.IsKeyHealthy(upstream.BaseURL, apiKey) {
+					healthy = append(healthy, slotCandidate{
+						channelIndex: ch.Index,
+						keyIndex:     keyIndex,
+						apiKey:       apiKey,
+						upstream:     upstream,
+						channel:      ch,
+					})
+				}
+			}
+		}
+		return healthy, all
+	}
+
+	// 0. 促销期：限定在促销渠道的 slots 内做选择（优先健康 slots）
+	promotedChannel := s.findPromotedChannel(activeChannels, isResponses)
+	if promotedChannel != nil {
+		if upstream := s.getUpstreamByIndex(promotedChannel.Index, isResponses); upstream != nil && len(upstream.APIKeys) > 0 {
+			promotedOnly := []ChannelInfo{*promotedChannel}
+			healthy, all := buildSlots(promotedOnly)
+			if len(healthy) == 0 {
+				healthy = all
+			}
+			if len(healthy) > 0 {
+				chosen := chooseSlotByRendezvous(userID, healthy)
+				log.Printf("[Scheduler-Promotion] 促销期优先选择槽位: [%d] %s (user: %s)", chosen.channelIndex, upstream.Name, maskUserID(userID))
+				return &SlotSelectionResult{
+					Upstream:     chosen.upstream,
+					ChannelIndex: chosen.channelIndex,
+					KeyIndex:     chosen.keyIndex,
+					APIKey:       chosen.apiKey,
+					Reason:       "promotion_priority",
+				}, nil
+			}
+		}
+	}
+
+	// 1. Trace 亲和：命中到具体槽位
+	if userID != "" {
+		if preferredCh, preferredKeyIdx, ok := s.traceAffinity.GetPreferredSlot(userID); ok && preferredCh >= 0 && preferredKeyIdx >= 0 {
+			upstream := s.getUpstreamByIndex(preferredCh, isResponses)
+			if upstream != nil && preferredKeyIdx < len(upstream.APIKeys) {
+				apiKey := upstream.APIKeys[preferredKeyIdx]
+				if apiKey != "" && (failedSlots == nil || !failedSlots[slotID(preferredCh, apiKey)]) &&
+					(s.configManager == nil || !s.configManager.IsKeyFailed(apiKey)) &&
+					(metricsManager == nil || metricsManager.IsKeyHealthy(upstream.BaseURL, apiKey)) {
+					// 仅 active 渠道可用
+					for _, ch := range activeChannels {
+						if ch.Index == preferredCh && ch.Status == "active" {
+							log.Printf("[Scheduler-Affinity] Trace亲和选择槽位: [%d] %s (user: %s)", preferredCh, upstream.Name, maskUserID(userID))
+							return &SlotSelectionResult{
+								Upstream:     upstream,
+								ChannelIndex: preferredCh,
+								KeyIndex:     preferredKeyIdx,
+								APIKey:       apiKey,
+								Reason:       "trace_affinity",
+							}, nil
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// 2. Rendezvous Hash：在所有健康槽位里稳定选择
+	healthy, all := buildSlots(activeChannels)
+	candidates := healthy
+	reason := "rendezvous_hash"
+	if len(candidates) == 0 {
+		candidates = all
+		reason = "rendezvous_fallback"
+	}
+	if len(candidates) == 0 {
+		return nil, fmt.Errorf("所有槽位都不可用")
+	}
+
+	chosen := chooseSlotByRendezvous(userID, candidates)
+	return &SlotSelectionResult{
+		Upstream:     chosen.upstream,
+		ChannelIndex: chosen.channelIndex,
+		KeyIndex:     chosen.keyIndex,
+		APIKey:       chosen.apiKey,
+		Reason:       reason,
+	}, nil
+}
+
+func chooseSlotByRendezvous(userID string, candidates []slotCandidate) slotCandidate {
+	// userID 为空时，按优先级最前的 slot（由 getActiveChannels 排序 + keyIndex 顺序）保证确定性
+	if userID == "" {
+		best := candidates[0]
+		for i := 1; i < len(candidates); i++ {
+			c := candidates[i]
+			if c.channel.Priority < best.channel.Priority {
+				best = c
+				continue
+			}
+			if c.channel.Priority == best.channel.Priority {
+				if c.channelIndex < best.channelIndex || (c.channelIndex == best.channelIndex && c.keyIndex < best.keyIndex) {
+					best = c
+				}
+			}
+		}
+		return best
+	}
+
+	var best slotCandidate
+	var bestScore uint64
+	for i, c := range candidates {
+		score := hash64(userID + "|" + slotID(c.channelIndex, c.apiKey))
+		if i == 0 || score > bestScore {
+			best = c
+			bestScore = score
+		}
+	}
+	return best
 }
 
 // SelectChannel 选择最佳渠道
@@ -319,6 +510,13 @@ func (s *ChannelScheduler) SetTraceAffinity(userID string, channelIndex int) {
 	}
 }
 
+// SetTraceAffinitySlot 设置 Trace 亲和到具体槽位（渠道+Key）
+func (s *ChannelScheduler) SetTraceAffinitySlot(userID string, channelIndex int, keyIndex int) {
+	if userID != "" {
+		s.traceAffinity.SetPreferredSlot(userID, channelIndex, keyIndex)
+	}
+}
+
 // UpdateTraceAffinity 更新 Trace 亲和时间（续期）
 func (s *ChannelScheduler) UpdateTraceAffinity(userID string) {
 	if userID != "" {
@@ -362,6 +560,32 @@ func (s *ChannelScheduler) ResetKeyMetrics(baseURL, apiKey string, isResponses b
 // GetActiveChannelCount 获取活跃渠道数量
 func (s *ChannelScheduler) GetActiveChannelCount(isResponses bool) int {
 	return len(s.getActiveChannels(isResponses))
+}
+
+// GetActiveSlotCount 获取活跃槽位数量（active 渠道下的全部 key 数）
+func (s *ChannelScheduler) GetActiveSlotCount(isResponses bool) int {
+	activeChannels := s.getActiveChannels(isResponses)
+	count := 0
+	for _, ch := range activeChannels {
+		if ch.Status != "active" {
+			continue
+		}
+		upstream := s.getUpstreamByIndex(ch.Index, isResponses)
+		if upstream == nil {
+			continue
+		}
+		for _, k := range upstream.APIKeys {
+			if k != "" {
+				count++
+			}
+		}
+	}
+	return count
+}
+
+// IsMultiSlotMode 判断是否为多槽位模式（(渠道,key) 扁平化负载均衡）
+func (s *ChannelScheduler) IsMultiSlotMode(isResponses bool) bool {
+	return s.GetActiveSlotCount(isResponses) > 1
 }
 
 // IsMultiChannelMode 判断是否为多渠道模式
@@ -524,6 +748,133 @@ func (s *ChannelScheduler) SelectGeminiChannel(
 	return s.selectFallbackGeminiChannel(activeChannels, failedChannels)
 }
 
+// SelectGeminiSlot 选择最佳 Gemini 槽位（渠道+Key）
+func (s *ChannelScheduler) SelectGeminiSlot(
+	ctx context.Context,
+	userID string,
+	failedSlots map[string]bool,
+) (*SlotSelectionResult, error) {
+	_ = ctx
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	activeChannels := s.getActiveGeminiChannels()
+	if len(activeChannels) == 0 {
+		return nil, fmt.Errorf("没有可用的活跃 Gemini 渠道")
+	}
+
+	metricsManager := s.geminiMetricsManager
+
+	buildSlots := func(channels []ChannelInfo) (healthy []slotCandidate, all []slotCandidate) {
+		for _, ch := range channels {
+			if ch.Status != "active" {
+				continue
+			}
+			upstream := s.getGeminiUpstreamByIndex(ch.Index)
+			if upstream == nil || len(upstream.APIKeys) == 0 {
+				continue
+			}
+			for keyIndex, apiKey := range upstream.APIKeys {
+				if apiKey == "" {
+					continue
+				}
+				if failedSlots != nil && failedSlots[slotID(ch.Index, apiKey)] {
+					continue
+				}
+				if s.configManager != nil && s.configManager.IsKeyFailed(apiKey) {
+					continue
+				}
+				all = append(all, slotCandidate{
+					channelIndex: ch.Index,
+					keyIndex:     keyIndex,
+					apiKey:       apiKey,
+					upstream:     upstream,
+					channel:      ch,
+				})
+				if metricsManager == nil || metricsManager.IsKeyHealthy(upstream.BaseURL, apiKey) {
+					healthy = append(healthy, slotCandidate{
+						channelIndex: ch.Index,
+						keyIndex:     keyIndex,
+						apiKey:       apiKey,
+						upstream:     upstream,
+						channel:      ch,
+					})
+				}
+			}
+		}
+		return healthy, all
+	}
+
+	// 0. 促销期渠道优先
+	promotedChannel := s.findPromotedGeminiChannel(activeChannels)
+	if promotedChannel != nil {
+		if upstream := s.getGeminiUpstreamByIndex(promotedChannel.Index); upstream != nil && len(upstream.APIKeys) > 0 {
+			promotedOnly := []ChannelInfo{*promotedChannel}
+			healthy, all := buildSlots(promotedOnly)
+			if len(healthy) == 0 {
+				healthy = all
+			}
+			if len(healthy) > 0 {
+				chosen := chooseSlotByRendezvous(userID, healthy)
+				log.Printf("[Scheduler-Gemini-Promotion] 促销期优先选择槽位: [%d] %s (user: %s)", chosen.channelIndex, upstream.Name, maskUserID(userID))
+				return &SlotSelectionResult{
+					Upstream:     chosen.upstream,
+					ChannelIndex: chosen.channelIndex,
+					KeyIndex:     chosen.keyIndex,
+					APIKey:       chosen.apiKey,
+					Reason:       "promotion_priority",
+				}, nil
+			}
+		}
+	}
+
+	// 1. Trace 亲和
+	if userID != "" {
+		if preferredCh, preferredKeyIdx, ok := s.traceAffinity.GetPreferredSlot(userID); ok && preferredCh >= 0 && preferredKeyIdx >= 0 {
+			upstream := s.getGeminiUpstreamByIndex(preferredCh)
+			if upstream != nil && preferredKeyIdx < len(upstream.APIKeys) {
+				apiKey := upstream.APIKeys[preferredKeyIdx]
+				if apiKey != "" && (failedSlots == nil || !failedSlots[slotID(preferredCh, apiKey)]) &&
+					(s.configManager == nil || !s.configManager.IsKeyFailed(apiKey)) &&
+					(metricsManager == nil || metricsManager.IsKeyHealthy(upstream.BaseURL, apiKey)) {
+					for _, ch := range activeChannels {
+						if ch.Index == preferredCh && ch.Status == "active" {
+							log.Printf("[Scheduler-Gemini-Affinity] Trace亲和选择槽位: [%d] %s (user: %s)", preferredCh, upstream.Name, maskUserID(userID))
+							return &SlotSelectionResult{
+								Upstream:     upstream,
+								ChannelIndex: preferredCh,
+								KeyIndex:     preferredKeyIdx,
+								APIKey:       apiKey,
+								Reason:       "trace_affinity",
+							}, nil
+						}
+					}
+				}
+			}
+		}
+	}
+
+	healthy, all := buildSlots(activeChannels)
+	candidates := healthy
+	reason := "rendezvous_hash"
+	if len(candidates) == 0 {
+		candidates = all
+		reason = "rendezvous_fallback"
+	}
+	if len(candidates) == 0 {
+		return nil, fmt.Errorf("所有 Gemini 槽位都不可用")
+	}
+
+	chosen := chooseSlotByRendezvous(userID, candidates)
+	return &SlotSelectionResult{
+		Upstream:     chosen.upstream,
+		ChannelIndex: chosen.channelIndex,
+		KeyIndex:     chosen.keyIndex,
+		APIKey:       chosen.apiKey,
+		Reason:       reason,
+	}, nil
+}
+
 // findPromotedGeminiChannel 查找处于促销期的 Gemini 渠道
 func (s *ChannelScheduler) findPromotedGeminiChannel(activeChannels []ChannelInfo) *ChannelInfo {
 	for i := range activeChannels {
@@ -670,7 +1021,33 @@ func (s *ChannelScheduler) GetActiveGeminiChannelCount() int {
 	return len(s.getActiveGeminiChannels())
 }
 
+// GetActiveGeminiSlotCount 获取活跃 Gemini 槽位数量
+func (s *ChannelScheduler) GetActiveGeminiSlotCount() int {
+	activeChannels := s.getActiveGeminiChannels()
+	count := 0
+	for _, ch := range activeChannels {
+		if ch.Status != "active" {
+			continue
+		}
+		upstream := s.getGeminiUpstreamByIndex(ch.Index)
+		if upstream == nil {
+			continue
+		}
+		for _, k := range upstream.APIKeys {
+			if k != "" {
+				count++
+			}
+		}
+	}
+	return count
+}
+
 // IsMultiChannelModeGemini 判断 Gemini 是否为多渠道模式
 func (s *ChannelScheduler) IsMultiChannelModeGemini() bool {
 	return s.GetActiveGeminiChannelCount() > 1
+}
+
+// IsMultiSlotModeGemini 判断 Gemini 是否为多槽位模式
+func (s *ChannelScheduler) IsMultiSlotModeGemini() bool {
+	return s.GetActiveGeminiSlotCount() > 1
 }

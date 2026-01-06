@@ -235,17 +235,17 @@ func (h *Handler) Handle(c *gin.Context) {
 	// 记录原始请求信息（仅在入口处记录一次）
 	common.LogOriginalRequest(c, bodyBytes, envCfg, "Responses")
 
-	// 检查是否为多渠道模式
-	isMultiChannel := channelScheduler.IsMultiChannelMode(true) // true = isResponses
+	// 多槽位模式：(渠道,key) 同层级负载均衡，并按 prompt_cache_key 做粘性
+	isMultiSlot := channelScheduler.IsMultiSlotMode(true) // true = isResponses
 
-	if isMultiChannel {
+	if isMultiSlot {
 		handleMultiChannel(c, envCfg, cfgManager, channelScheduler, sessionManager, bodyBytes, responsesReq, userID, startTime, billingHandler, billingCtx, reqCtx)
 	} else {
 		handleSingleChannel(c, envCfg, cfgManager, channelScheduler, sessionManager, bodyBytes, responsesReq, startTime, billingHandler, billingCtx, reqCtx)
 	}
 }
 
-// handleMultiChannel 处理多渠道 Responses 请求
+// handleMultiChannel 处理多槽位 Responses 请求（(渠道,key) 扁平化）
 func handleMultiChannel(
 	c *gin.Context,
 	envCfg *config.EnvConfig,
@@ -260,14 +260,14 @@ func handleMultiChannel(
 	billingCtx *billing.RequestContext,
 	reqCtx *requestLogContext,
 ) {
-	failedChannels := make(map[int]bool)
+	failedSlots := make(map[string]bool)
 	var lastError error
 	var lastFailoverError *common.FailoverError
 
-	maxChannelAttempts := channelScheduler.GetActiveChannelCount(true) // true = isResponses
+	maxSlotAttempts := channelScheduler.GetActiveSlotCount(true) // true = isResponses
 
-	for channelAttempt := 0; channelAttempt < maxChannelAttempts; channelAttempt++ {
-		selection, err := channelScheduler.SelectChannel(c.Request.Context(), userID, failedChannels, true)
+	for slotAttempt := 0; slotAttempt < maxSlotAttempts; slotAttempt++ {
+		selection, err := channelScheduler.SelectSlot(c.Request.Context(), userID, failedSlots, true)
 		if err != nil {
 			lastError = err
 			break
@@ -288,15 +288,17 @@ func handleMultiChannel(
 		}
 
 		if envCfg.ShouldLog("info") {
-			log.Printf("[Responses-Select] 选择渠道: [%d] %s (原因: %s, 尝试 %d/%d)",
-				channelIndex, upstream.Name, selection.Reason, channelAttempt+1, maxChannelAttempts)
+			log.Printf("[Responses-Select] 选择槽位: [%d] %s (原因: %s, 尝试 %d/%d)",
+				channelIndex, upstream.Name, selection.Reason, slotAttempt+1, maxSlotAttempts)
 		}
 
-		success, successKey, successBaseURLIdx, failoverErr, usage := tryChannelWithAllKeys(c, envCfg, cfgManager, channelScheduler, sessionManager, upstream, channelIndex, bodyBytes, responsesReq, startTime, billingHandler, billingCtx, reqCtx)
+		upstreamOneKey := upstream.Clone()
+		upstreamOneKey.APIKeys = []string{selection.APIKey}
+		success, successKey, successBaseURLIdx, failoverErr, usage := tryChannelWithAllKeys(c, envCfg, cfgManager, channelScheduler, sessionManager, upstreamOneKey, channelIndex, bodyBytes, responsesReq, startTime, billingHandler, billingCtx, reqCtx)
 
 		if success {
 			if successKey != "" {
-				mappedModel := config.RedirectModel(responsesReq.Model, upstream)
+				mappedModel := config.RedirectModel(responsesReq.Model, upstreamOneKey)
 				var costCents int64
 				if billingHandler != nil && usage != nil {
 					costCents = billingHandler.CalculateCost(mappedModel, usage.InputTokens, usage.OutputTokens, usage.CacheCreationInputTokens, usage.CacheReadInputTokens)
@@ -310,24 +312,24 @@ func handleMultiChannel(
 					reqCtx.model = mappedModel
 					reqCtx.updateLive()
 				}
-				channelScheduler.RecordSuccessWithUsage(upstream.GetAllBaseURLs()[successBaseURLIdx], successKey, usage, true, mappedModel, costCents)
+				channelScheduler.RecordSuccessWithUsage(upstreamOneKey.GetAllBaseURLs()[successBaseURLIdx], successKey, usage, true, mappedModel, costCents)
 			}
 			if reqCtx != nil && successKey == "" {
 				reqCtx.success = true
 				reqCtx.errorMsg = ""
 			}
-			channelScheduler.SetTraceAffinity(userID, channelIndex)
+			channelScheduler.SetTraceAffinitySlot(userID, channelIndex, selection.KeyIndex)
 			return
 		}
 
-		failedChannels[channelIndex] = true
+		failedSlots[fmt.Sprintf("%d:%s", channelIndex, selection.APIKey)] = true
 
 		if failoverErr != nil {
 			lastFailoverError = failoverErr
-			lastError = fmt.Errorf("渠道 [%d] %s 失败", channelIndex, upstream.Name)
+			lastError = fmt.Errorf("槽位 [%d] %s 失败", channelIndex, upstream.Name)
 		}
 
-		log.Printf("[Responses-Failover] 警告: 渠道 [%d] %s 所有密钥都失败，尝试下一个渠道", channelIndex, upstream.Name)
+		log.Printf("[Responses-Failover] 警告: 槽位 [%d] %s key=%s 失败，尝试下一个槽位", channelIndex, upstream.Name, utils.MaskAPIKey(selection.APIKey))
 	}
 
 	log.Printf("[Responses-Error] 所有渠道都失败了")

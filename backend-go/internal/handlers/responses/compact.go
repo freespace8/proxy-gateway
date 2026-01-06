@@ -3,6 +3,7 @@ package responses
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -50,10 +51,10 @@ func CompactHandler(
 		// 提取对话标识用于 Trace 亲和性
 		userID := common.ExtractConversationID(c, bodyBytes)
 
-		// 检查是否为多渠道模式
-		isMultiChannel := channelScheduler.IsMultiChannelMode(true)
+		// 多槽位模式：(渠道,key) 同层级负载均衡，并按 prompt_cache_key 做粘性
+		isMultiSlot := channelScheduler.IsMultiSlotMode(true)
 
-		if isMultiChannel {
+		if isMultiSlot {
 			handleMultiChannelCompact(c, envCfg, cfgManager, channelScheduler, bodyBytes, userID)
 		} else {
 			handleSingleChannelCompact(c, envCfg, cfgManager, bodyBytes)
@@ -135,12 +136,12 @@ func handleMultiChannelCompact(
 	bodyBytes []byte,
 	userID string,
 ) {
-	failedChannels := make(map[int]bool)
-	maxAttempts := channelScheduler.GetActiveChannelCount(true)
+	failedSlots := make(map[string]bool)
+	maxAttempts := channelScheduler.GetActiveSlotCount(true)
 	var lastErr *compactError
 
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		selection, err := channelScheduler.SelectChannel(c.Request.Context(), userID, failedChannels, true)
+		selection, err := channelScheduler.SelectSlot(c.Request.Context(), userID, failedSlots, true)
 		if err != nil {
 			break
 		}
@@ -148,19 +149,21 @@ func handleMultiChannelCompact(
 		upstream := selection.Upstream
 		channelIndex := selection.ChannelIndex
 
-		// 每个渠道尝试所有 key
-		success, successKey, compactErr := tryCompactChannelWithAllKeys(c, upstream, cfgManager, channelScheduler, bodyBytes, envCfg)
+		// 每个槽位仅尝试该 key（失败则迁移到下一个槽位）
+		upstreamOneKey := upstream.Clone()
+		upstreamOneKey.APIKeys = []string{selection.APIKey}
+		success, successKey, compactErr := tryCompactChannelWithAllKeys(c, upstreamOneKey, cfgManager, channelScheduler, bodyBytes, envCfg)
 
 		if success {
 			// compact 不产生 usage，但仍需记录成功以更新熔断器/权重
 			if successKey != "" {
-				channelScheduler.RecordSuccessWithUsage(upstream.BaseURL, successKey, nil, true, "", 0)
+				channelScheduler.RecordSuccessWithUsage(upstreamOneKey.BaseURL, successKey, nil, true, "", 0)
 			}
-			channelScheduler.SetTraceAffinity(userID, channelIndex)
+			channelScheduler.SetTraceAffinitySlot(userID, channelIndex, selection.KeyIndex)
 			return
 		}
 
-		failedChannels[channelIndex] = true
+		failedSlots[fmt.Sprintf("%d:%s", channelIndex, selection.APIKey)] = true
 		if compactErr != nil {
 			lastErr = compactErr
 		}

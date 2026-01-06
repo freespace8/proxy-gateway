@@ -13,6 +13,8 @@ import (
 func TestTryModelsRequest_ErrorBranches_ReturnsFalse(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
+	const testRoutingID = "test-routing-id"
+
 	t.Run("no_channels", func(t *testing.T) {
 		cfg := config.Config{
 			Upstream:             nil,
@@ -31,6 +33,7 @@ func TestTryModelsRequest_ErrorBranches_ReturnsFalse(t *testing.T) {
 		w := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(w)
 		c.Request = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+		c.Set(modelsRoutingContextKey, testRoutingID)
 
 		body, ok := tryModelsRequest(c, cfgManager, sch, http.MethodGet, "", false)
 		if ok || body != nil {
@@ -57,6 +60,7 @@ func TestTryModelsRequest_ErrorBranches_ReturnsFalse(t *testing.T) {
 		w := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(w)
 		c.Request = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+		c.Set(modelsRoutingContextKey, testRoutingID)
 
 		body, ok := tryModelsRequest(c, cfgManager, sch, http.MethodGet, "", false)
 		if ok || body != nil {
@@ -83,6 +87,7 @@ func TestTryModelsRequest_ErrorBranches_ReturnsFalse(t *testing.T) {
 		w := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(w)
 		c.Request = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+		c.Set(modelsRoutingContextKey, testRoutingID)
 
 		body, ok := tryModelsRequest(c, cfgManager, sch, http.MethodGet, "", false)
 		if ok || body != nil {
@@ -128,6 +133,7 @@ func TestTryModelsRequest_ErrorBranches_ReturnsFalse(t *testing.T) {
 		w := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(w)
 		c.Request = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+		c.Set(modelsRoutingContextKey, testRoutingID)
 
 		body, ok := tryModelsRequest(c, cfgManager, sch, http.MethodGet, "", false)
 		if ok || body != nil {
@@ -154,6 +160,7 @@ func TestTryModelsRequest_ErrorBranches_ReturnsFalse(t *testing.T) {
 		w := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(w)
 		c.Request = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+		c.Set(modelsRoutingContextKey, testRoutingID)
 
 		body, ok := tryModelsRequest(c, cfgManager, sch, http.MethodGet, "", false)
 		if ok || body != nil {
@@ -206,6 +213,7 @@ func TestTryModelsRequest_ErrorBranches_ReturnsFalse(t *testing.T) {
 		w := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(w)
 		c.Request = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+		c.Set(modelsRoutingContextKey, testRoutingID)
 
 		body, ok := tryModelsRequest(c, cfgManager, sch, http.MethodGet, "", false)
 		if !ok || body == nil {

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -19,10 +20,13 @@ import (
 	"github.com/BenedictKing/claude-proxy/internal/scheduler"
 	"github.com/BenedictKing/claude-proxy/internal/utils"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 const modelsRequestTimeout = 30 * time.Second
 const modelsCacheContentType = gin.MIMEJSON
+
+const modelsRoutingContextKey = "__models_routing_id"
 
 // ModelsResponse OpenAI 兼容的 models 响应格式
 type ModelsResponse struct {
@@ -204,45 +208,52 @@ func mergeModels(models1, models2 []ModelEntry) []ModelEntry {
 
 // tryModelsRequest 使用调度器选择渠道，按故障转移顺序尝试请求 models 端点
 func tryModelsRequest(c *gin.Context, cfgManager *config.ConfigManager, channelScheduler *scheduler.ChannelScheduler, method, suffix string, isResponses bool) ([]byte, bool) {
-	failedChannels := make(map[int]bool)
-	maxChannelRetries := 10 // 最多尝试 10 个渠道
+	if c == nil || c.Request == nil || channelScheduler == nil {
+		return nil, false
+	}
+
+	failedSlots := make(map[string]bool)
+	maxSlotRetries := 10 // 最多尝试 10 个槽位
+	if n := channelScheduler.GetActiveSlotCount(isResponses); n > 0 && n < maxSlotRetries {
+		maxSlotRetries = n
+	}
 
 	channelType := "Messages"
 	if isResponses {
 		channelType = "Responses"
 	}
 
-	for attempt := 0; attempt < maxChannelRetries; attempt++ {
-		// 使用调度器选择渠道
-		selection, err := channelScheduler.SelectChannel(c.Request.Context(), "", failedChannels, isResponses)
+	// models 请求没有 userID，可使用 context 覆盖或随机请求 ID 提供均衡散列
+	var routingID string
+	if c != nil {
+		if v, exists := c.Get(modelsRoutingContextKey); exists {
+			routingID = fmt.Sprint(v)
+		}
+	}
+	if routingID == "" {
+		routingID = fmt.Sprintf("models:%s", uuid.NewString())
+	}
+
+	for attempt := 0; attempt < maxSlotRetries; attempt++ {
+		// 使用调度器选择槽位（routingID 保证请求级的均衡散列）
+		selection, err := channelScheduler.SelectSlot(c.Request.Context(), routingID, failedSlots, isResponses)
 		if err != nil {
 			log.Printf("[Models] %s 渠道无可用: %v", channelType, err)
 			break
 		}
 
 		upstream := selection.Upstream
-
-		// 尝试该渠道的第一个 key
-		if len(upstream.APIKeys) == 0 {
-			failedChannels[selection.ChannelIndex] = true
-			continue
-		}
+		channelIndex := selection.ChannelIndex
 
 		url := buildModelsURL(upstream.BaseURL) + suffix
 		client := httpclient.GetManager().GetStandardClient(modelsRequestTimeout, upstream.InsecureSkipVerify)
 
-		// 获取第一个可用的 key
-		apiKey, err := cfgManager.GetNextAPIKey(upstream, nil)
-		if err != nil {
-			log.Printf("[Models] %s 获取 API Key 失败: channel=%s, error=%v", channelType, upstream.Name, err)
-			failedChannels[selection.ChannelIndex] = true
-			continue
-		}
+		apiKey := selection.APIKey
 
 		req, err := http.NewRequestWithContext(c.Request.Context(), method, url, nil)
 		if err != nil {
 			log.Printf("[Models] %s 创建请求失败: channel=%s, url=%s, error=%v", channelType, upstream.Name, url, err)
-			failedChannels[selection.ChannelIndex] = true
+			failedSlots[fmt.Sprintf("%d:%s", channelIndex, apiKey)] = true
 			continue
 		}
 		req.Header.Set("Authorization", "Bearer "+apiKey)
@@ -252,7 +263,7 @@ func tryModelsRequest(c *gin.Context, cfgManager *config.ConfigManager, channelS
 		if err != nil {
 			log.Printf("[Models] %s 请求失败: channel=%s, key=%s, url=%s, error=%v",
 				channelType, upstream.Name, utils.MaskAPIKey(apiKey), url, err)
-			failedChannels[selection.ChannelIndex] = true
+			failedSlots[fmt.Sprintf("%d:%s", channelIndex, apiKey)] = true
 			continue
 		}
 
@@ -261,7 +272,7 @@ func tryModelsRequest(c *gin.Context, cfgManager *config.ConfigManager, channelS
 			resp.Body.Close()
 			if err != nil {
 				log.Printf("[Models] %s 读取响应失败: channel=%s, error=%v", channelType, upstream.Name, err)
-				failedChannels[selection.ChannelIndex] = true
+				failedSlots[fmt.Sprintf("%d:%s", channelIndex, apiKey)] = true
 				continue
 			}
 			log.Printf("[Models] %s 请求成功: method=%s, channel=%s, key=%s, url=%s, reason=%s",
@@ -272,7 +283,7 @@ func tryModelsRequest(c *gin.Context, cfgManager *config.ConfigManager, channelS
 		log.Printf("[Models] %s 上游返回非 200: channel=%s, key=%s, status=%d, url=%s",
 			channelType, upstream.Name, utils.MaskAPIKey(apiKey), resp.StatusCode, url)
 		resp.Body.Close()
-		failedChannels[selection.ChannelIndex] = true
+		failedSlots[fmt.Sprintf("%d:%s", channelIndex, apiKey)] = true
 	}
 
 	log.Printf("[Models] %s 所有渠道均失败: method=%s, suffix=%s", channelType, method, suffix)

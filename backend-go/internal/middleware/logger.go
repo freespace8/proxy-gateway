@@ -9,6 +9,13 @@ import (
 )
 
 // 默认跳过日志的路径前缀（仅 GET 请求）
+// 这些端点在任何情况下都不输出日志（用于降低高频轮询噪音）
+var alwaysSkipPrefixes = []string{
+	"/api/responses/live",
+	"/api/responses/logs",
+}
+
+// 默认跳过日志的路径前缀（仅 GET 请求）
 var defaultSkipPrefixes = []string{
 	"/api/messages/channels",
 	"/api/responses/channels",
@@ -22,13 +29,13 @@ var defaultSkipPrefixes = []string{
 // 仅对 GET 请求且匹配 skipPrefixes 前缀的路径跳过日志输出
 // POST/PUT/DELETE 等管理操作始终记录日志以保留审计跟踪
 func FilteredLogger(envCfg *config.EnvConfig, skipPrefixes ...string) gin.HandlerFunc {
-	// 如果 QuietPollingLogs 为 false，使用标准 Logger
-	if !envCfg.QuietPollingLogs {
-		return gin.Logger()
-	}
-
-	if len(skipPrefixes) == 0 {
-		skipPrefixes = defaultSkipPrefixes
+	var quietSkipPrefixes []string
+	if envCfg.QuietPollingLogs {
+		if len(skipPrefixes) == 0 {
+			quietSkipPrefixes = defaultSkipPrefixes
+		} else {
+			quietSkipPrefixes = skipPrefixes
+		}
 	}
 
 	return gin.LoggerWithConfig(gin.LoggerConfig{
@@ -39,7 +46,21 @@ func FilteredLogger(envCfg *config.EnvConfig, skipPrefixes ...string) gin.Handle
 			}
 
 			path := c.Request.URL.Path
-			for _, prefix := range skipPrefixes {
+
+			// 永久静默（不受 QuietPollingLogs 影响）
+			for _, prefix := range alwaysSkipPrefixes {
+				if strings.HasPrefix(path, prefix) {
+					return true
+				}
+			}
+
+			// QuietPollingLogs 为 false 时，仅应用永久静默规则
+			if !envCfg.QuietPollingLogs {
+				return false
+			}
+
+			// QuietPollingLogs 为 true 时，额外应用可配置的轮询端点过滤
+			for _, prefix := range quietSkipPrefixes {
 				if strings.HasPrefix(path, prefix) {
 					return true
 				}

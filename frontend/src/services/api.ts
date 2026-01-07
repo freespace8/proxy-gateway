@@ -41,6 +41,16 @@ export interface TimeWindowStats {
   cacheHitRate?: number
 }
 
+export interface KeyMetrics {
+  keyMask: string
+  requestCount: number
+  successCount: number
+  failureCount: number
+  successRate: number
+  consecutiveFailures: number
+  circuitBroken: boolean
+}
+
 export interface ChannelMetrics {
   channelIndex: number
   requestCount: number
@@ -59,6 +69,8 @@ export interface ChannelMetrics {
     '6h': TimeWindowStats
     '24h': TimeWindowStats
   }
+  // Key 级指标（按配置 key 顺序）
+  keyMetrics?: KeyMetrics[]
 }
 
 export interface Channel {
@@ -72,7 +84,9 @@ export interface Channel {
   insecureSkipVerify?: boolean
   modelMapping?: Record<string, string>
   latency?: number
-  status?: ChannelStatus | 'healthy' | 'error' | 'unknown'
+  status?: ChannelStatus
+  // 仅用于“测试延迟/连通性”展示，不参与故障转移/备用池分组
+  health?: 'healthy' | 'error' | 'unknown'
   index: number
   pinned?: boolean
   // 多渠道调度相关字段
@@ -128,6 +142,10 @@ export interface MetricsHistoryResponse {
   channelName: string
   dataPoints: HistoryDataPoint[]
   warning?: string
+}
+
+export interface CircuitLogResponse {
+  log: string
 }
 
 // Key 级别历史数据点（包含 Token 数据）
@@ -719,6 +737,25 @@ class ApiService {
   }
 
   // ============== 请求日志与实时监控 API ==============
+
+  // 获取 Key 的熔断日志（每个 key 仅保留 1 条）
+  async getKeyCircuitLog(apiType: ApiType, channelId: number, keyIndex: number): Promise<CircuitLogResponse> {
+    return this.request(`/${apiType}/channels/${channelId}/keys/index/${keyIndex}/circuit-log`)
+  }
+
+  // 重置 Key 的熔断/冷却状态
+  async resetKeyCircuitState(apiType: ApiType, channelId: number, keyIndex: number): Promise<void> {
+    await this.request(`/${apiType}/channels/${channelId}/keys/index/${keyIndex}/reset`, {
+      method: 'POST'
+    })
+  }
+
+  // 仅重置 Key 的熔断/冷却状态（不清空累计统计）
+  async resetKeyCircuitStatus(apiType: ApiType, channelId: number, keyIndex: number): Promise<void> {
+    await this.request(`/${apiType}/channels/${channelId}/keys/index/${keyIndex}/reset-state`, {
+      method: 'POST'
+    })
+  }
 
   // 获取请求日志
   async getRequestLogs(apiType: ApiType, limit = 50, offset = 0): Promise<RequestLogsResponse> {

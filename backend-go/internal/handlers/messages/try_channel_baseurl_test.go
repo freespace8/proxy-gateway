@@ -137,6 +137,7 @@ func TestTryChannelWithAllKeys_BaseURLFailover_DeprioritizeSaveErrorIsLogged(t *
 		envCfg,
 		cfgManager,
 		sch,
+		nil,
 		&cfg.Upstream[0],
 		0,
 		bodyBytes,

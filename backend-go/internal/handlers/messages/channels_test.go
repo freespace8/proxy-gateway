@@ -29,7 +29,7 @@ func TestChannelsHandlers_CRUDAndPing(t *testing.T) {
 	cfg := config.Config{
 		Upstream: []config.UpstreamConfig{
 			{
-				Name:        "ch0",
+				Name:         "ch0",
 				BaseURLs:     []string{pingSlow.URL, pingFast.URL},
 				APIKeys:      []string{"k1", "k2"},
 				ServiceType:  "claude",

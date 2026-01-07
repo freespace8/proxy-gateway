@@ -546,8 +546,11 @@ func (s *ChannelScheduler) ResetChannelMetrics(channelIndex int, isResponses boo
 		return
 	}
 	metricsManager := s.getMetricsManager(isResponses)
-	for _, apiKey := range upstream.APIKeys {
-		metricsManager.ResetKey(upstream.BaseURL, apiKey)
+	baseURLs := upstream.GetAllBaseURLs()
+	for _, baseURL := range baseURLs {
+		for _, apiKey := range upstream.APIKeys {
+			metricsManager.ResetKey(baseURL, apiKey)
+		}
 	}
 	log.Printf("[Scheduler-Reset] 渠道 [%d] %s 的所有 Key 指标已重置", channelIndex, upstream.Name)
 }
@@ -555,6 +558,11 @@ func (s *ChannelScheduler) ResetChannelMetrics(channelIndex int, isResponses boo
 // ResetKeyMetrics 重置单个 Key 的指标
 func (s *ChannelScheduler) ResetKeyMetrics(baseURL, apiKey string, isResponses bool) {
 	s.getMetricsManager(isResponses).ResetKey(baseURL, apiKey)
+}
+
+// ResetKeyState 仅重置单个 Key 的熔断/连续失败状态，不清空累计统计。
+func (s *ChannelScheduler) ResetKeyState(baseURL, apiKey string, isResponses bool) {
+	s.getMetricsManager(isResponses).ResetKeyState(baseURL, apiKey)
 }
 
 // GetActiveChannelCount 获取活跃渠道数量
@@ -1010,8 +1018,11 @@ func (s *ChannelScheduler) ResetGeminiChannelMetrics(channelIndex int) {
 	if upstream == nil {
 		return
 	}
-	for _, apiKey := range upstream.APIKeys {
-		s.geminiMetricsManager.ResetKey(upstream.BaseURL, apiKey)
+	baseURLs := upstream.GetAllBaseURLs()
+	for _, baseURL := range baseURLs {
+		for _, apiKey := range upstream.APIKeys {
+			s.geminiMetricsManager.ResetKey(baseURL, apiKey)
+		}
 	}
 	log.Printf("[Scheduler-Gemini-Reset] 渠道 [%d] %s 的所有 Key 指标已重置", channelIndex, upstream.Name)
 }

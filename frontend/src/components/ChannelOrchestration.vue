@@ -17,14 +17,12 @@
 
     <v-divider />
 
-    <!-- 故障转移序列 (active + suspended) -->
-    <div class="pt-3 pb-2">
-      <CacheStats class="mb-3" />
-
-      <div class="d-flex align-center justify-space-between mb-2">
-        <div class="text-subtitle-2 text-medium-emphasis d-flex align-center">
-          <v-icon size="small" class="mr-1" color="success">mdi-play-circle</v-icon>
-          故障转移序列
+	    <!-- 故障转移序列 (active + suspended) -->
+	    <div class="pt-3 pb-2">
+	      <div class="d-flex align-center justify-space-between mb-2">
+	        <div class="text-subtitle-2 text-medium-emphasis d-flex align-center">
+	          <v-icon size="small" class="mr-1" color="success">mdi-play-circle</v-icon>
+	          故障转移序列
           <v-chip size="x-small" class="ml-2">{{ activeChannels.length }}</v-chip>
         </div>
         <div class="d-flex align-center ga-2">
@@ -47,7 +45,7 @@
             <div
               class="channel-row"
               :class="{ 'is-suspended': element.status === 'suspended' }"
-              @click="toggleChannelChart(element.index)"
+              @click="toggleChannelStats(element.index)"
             >
             <!-- 拖拽手柄 -->
             <div class="drag-handle" @click.stop>
@@ -61,7 +59,7 @@
 
             <!-- 状态指示器 -->
             <div @click.stop>
-              <ChannelStatusBadge :status="element.status || 'active'" :metrics="getChannelMetrics(element.index)" />
+	              <ChannelStatusBadge :status="getChannelDisplayStatus(element)" :metrics="getChannelMetrics(element.index)" />
             </div>
 
             <!-- 渠道名称和描述 -->
@@ -106,8 +104,8 @@
               <v-icon
                 size="x-small"
                 class="ml-auto expand-icon"
-                :color="expandedChannelIndex === element.index ? 'primary' : 'grey-lighten-1'"
-              >{{ expandedChannelIndex === element.index ? 'mdi-chevron-up' : 'mdi-chevron-down' }}</v-icon>
+                :color="statsExpandedChannelIndex === element.index ? 'primary' : 'grey-lighten-1'"
+              >{{ statsExpandedChannelIndex === element.index ? 'mdi-chevron-up' : 'mdi-chevron-down' }}</v-icon>
             </div>
 
             <!-- 指标显示 -->
@@ -281,20 +279,99 @@
             </div>
           </div>
 
-          <!-- 展开的图表区域 -->
-          <v-expand-transition>
-            <div v-if="expandedChannelIndex === element.index" class="channel-chart-wrapper">
-              <KeyTrendChart
-                :key="`chart-${channelType}-${element.index}`"
-                :channel-id="element.index"
-                :channel-type="channelType"
-                @close="expandedChannelIndex = null"
-              />
-            </div>
-          </v-expand-transition>
-          </div>
-        </template>
-      </draggable>
+	          <div class="channel-chart-wrapper">
+	              <div class="key-metrics-panel" @click.stop>
+		                <div class="d-flex align-center justify-space-between mb-2">
+		                  <div class="text-subtitle-2 text-medium-emphasis d-flex align-center">
+		                    <v-icon size="small" class="mr-1" color="warning">mdi-key</v-icon>
+		                    Key 状态
+	                  </div>
+	                  <v-btn size="x-small" variant="text" @click.stop="refreshMetrics">刷新</v-btn>
+	                </div>
+	
+	                <v-table density="compact" class="key-metrics-table">
+	                  <thead>
+	                    <tr>
+	                      <th style="width: 64px;">序号</th>
+	                      <th>Key</th>
+	                      <th style="width: 110px;">状态</th>
+                      <th style="width: 120px;">成功率</th>
+                      <th style="width: 110px;">请求</th>
+                      <th style="width: 140px;">连续失败</th>
+                      <th style="width: 200px;">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr
+                      v-for="(km, keyIndex) in (getChannelMetrics(element.index)?.keyMetrics || [])"
+                      :key="`${element.index}-${keyIndex}`"
+                    >
+                      <td class="text-caption">{{ keyIndex + 1 }}</td>
+                      <td class="text-caption">{{ km.keyMask }}</td>
+                      <td>
+                        <v-chip
+                          v-if="km.circuitBroken"
+                          size="x-small"
+                          color="warning"
+                          variant="tonal"
+                        >
+                          熔断
+                        </v-chip>
+                        <v-chip v-else size="x-small" color="success" variant="tonal">正常</v-chip>
+                      </td>
+	                      <td>{{ km.successRate?.toFixed(0) }}%</td>
+	                      <td>{{ km.requestCount }}</td>
+	                      <td>{{ km.consecutiveFailures }}</td>
+	                      <td>
+	                        <div class="d-flex align-center ga-1">
+	                          <v-btn
+	                            size="x-small"
+	                            variant="text"
+	                            @click.stop="openCircuitLog(element.index, keyIndex, km.keyMask)"
+	                          >
+                            查看失败日志
+	                          </v-btn>
+	                          <v-btn
+	                            size="x-small"
+	                            variant="text"
+	                            color="warning"
+	                            @click.stop="resetKeyStatus(element.index, keyIndex, km.keyMask)"
+	                          >
+	                            重置状态
+	                          </v-btn>
+	                          <v-btn
+	                            size="x-small"
+	                            variant="text"
+	                            color="warning"
+	                            @click.stop="resetKeyCircuit(element.index, keyIndex, km.keyMask)"
+	                          >
+	                            重置统计
+	                          </v-btn>
+	                        </div>
+	                      </td>
+	                    </tr>
+                    <tr v-if="(getChannelMetrics(element.index)?.keyMetrics || []).length === 0">
+                      <td colspan="7" class="text-caption text-medium-emphasis py-3">暂无 Key 指标</td>
+                    </tr>
+                  </tbody>
+                </v-table>
+	              </div>
+
+		              <v-expand-transition>
+		                <div v-if="statsExpandedChannelIndex === element.index">
+		                  <v-divider class="my-3" />
+		                  <KeyTrendChart
+		                    :key="`chart-${channelType}-${element.index}`"
+		                    :channel-id="element.index"
+		                    :channel-type="channelType"
+		                    @close="statsExpandedChannelIndex = null"
+		                  />
+		                </div>
+		              </v-expand-transition>
+		          </div>
+	          </div>
+	        </template>
+	      </draggable>
 
       <!-- 空状态 -->
       <div v-if="activeChannels.length === 0" class="text-center py-6 text-medium-emphasis">
@@ -387,15 +464,23 @@
       <div v-else class="text-center py-4 text-medium-emphasis text-caption">所有渠道都处于活跃状态</div>
     </div>
   </v-card>
+
+  <CircuitLogModal
+    v-model="isCircuitLogOpen"
+    :title="circuitLogTitle"
+    :log="circuitLog"
+    :loading="isCircuitLogLoading"
+    :error="circuitLogError"
+  />
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
-import draggable from 'vuedraggable'
-import { api, type Channel, type ChannelMetrics, type ChannelStatus, type TimeWindowStats } from '../services/api'
-import CacheStats from './CacheStats.vue'
-import ChannelStatusBadge from './ChannelStatusBadge.vue'
-import KeyTrendChart from './KeyTrendChart.vue'
+	import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+	import draggable from 'vuedraggable'
+	import { api, type Channel, type ChannelMetrics, type ChannelStatus, type TimeWindowStats } from '../services/api'
+	import ChannelStatusBadge from './ChannelStatusBadge.vue'
+	import KeyTrendChart from './KeyTrendChart.vue'
+	import CircuitLogModal from './CircuitLogModal.vue'
 
 const props = defineProps<{
   channels: Channel[]
@@ -434,7 +519,14 @@ const schedulerStats = ref<{
   windowSize: number
 } | null>(null)
 const isLoadingMetrics = ref(false)
-const isSavingOrder = ref(false)
+	const isSavingOrder = ref(false)
+
+// 熔断日志弹窗
+const isCircuitLogOpen = ref(false)
+const isCircuitLogLoading = ref(false)
+const circuitLogTitle = ref('')
+const circuitLog = ref('')
+const circuitLogError = ref('')
 
 // 延迟测试结果有效期（5 分钟）
 const LATENCY_VALID_DURATION = 5 * 60 * 1000
@@ -442,13 +534,17 @@ const LATENCY_VALID_DURATION = 5 * 60 * 1000
 const currentTime = ref(Date.now())
 let latencyCheckTimer: ReturnType<typeof setInterval> | null = null
 
-// 图表展开状态
-const expandedChannelIndex = ref<number | null>(null)
+	// 统计图表展开状态（Key 状态始终显示；折叠仅作用于统计图表）
+	const statsExpandedChannelIndex = ref<number | null>(null)
 
-// 切换渠道图表展开/收起
-const toggleChannelChart = (channelIndex: number) => {
-  expandedChannelIndex.value = expandedChannelIndex.value === channelIndex ? null : channelIndex
-}
+	const toggleChannelStats = (channelIndex: number) => {
+	  statsExpandedChannelIndex.value = statsExpandedChannelIndex.value === channelIndex ? null : channelIndex
+	}
+
+	const getChannelDisplayStatus = (channel: Channel): ChannelStatus | 'healthy' | 'error' | 'unknown' => {
+	  if (channel.status === 'disabled' || channel.status === 'suspended') return channel.status
+	  return channel.health ?? channel.status ?? 'active'
+	}
 
 // 活跃渠道（可拖拽排序）- 包含 active 和 suspended 状态
 const activeChannels = ref<Channel[]>([])
@@ -465,14 +561,14 @@ const inactiveChannels = computed(() => {
 // 3. 有多个 active 渠道 → 多渠道模式
 const isMultiChannelMode = computed(() => {
   const activeCount = props.channels.filter(
-    ch => ch.status === 'active' || ch.status === undefined || ch.status === ''
+    ch => ch.status === 'active' || !ch.status
   ).length
   return activeCount > 1
 })
 
 // 初始化活跃渠道列表 - active + suspended 都参与故障转移序列
 // 优化：只在结构变化时更新，避免频繁重建导致子组件销毁
-const initActiveChannels = () => {
+	const initActiveChannels = () => {
   const newActive = props.channels
     .filter(ch => ch.status !== 'disabled')
     .sort((a, b) => (a.priority ?? a.index) - (b.priority ?? b.index))
@@ -481,16 +577,18 @@ const initActiveChannels = () => {
   const currentIndexes = activeChannels.value.map(ch => ch.index).join(',')
   const newIndexes = newActive.map(ch => ch.index).join(',')
 
-  if (currentIndexes !== newIndexes) {
-    // 结构变化（新增/删除/重排），需要重建数组
-    activeChannels.value = [...newActive]
-  } else {
+	  if (currentIndexes !== newIndexes) {
+	    // 结构变化（新增/删除/重排），需要重建数组
+	    activeChannels.value = [...newActive]
+	  } else {
     // 结构未变，只更新现有对象的属性（保持引用不变）
-    activeChannels.value.forEach((ch, i) => {
-      Object.assign(ch, newActive[i])
-    })
-  }
-}
+	    activeChannels.value.forEach((ch, i) => {
+	      Object.assign(ch, newActive[i])
+	    })
+	  }
+
+	  // Key 状态始终显示；不做默认展开统计图表
+	}
 
 // 监听 channels 变化
 watch(() => props.channels, initActiveChannels, { immediate: true, deep: true })
@@ -508,14 +606,14 @@ watch(() => props.dashboardStats, (newStats) => {
   }
 }, { immediate: true })
 
-// 监听 channelType 变化 - 切换时刷新指标并收起图表
-watch(() => props.channelType, () => {
-  expandedChannelIndex.value = null // 收起展开的图表
-  // 如果没有使用 dashboard props，则自己刷新
-  if (!props.dashboardMetrics) {
-    refreshMetrics()
-  }
-})
+	// 监听 channelType 变化 - 切换时刷新指标并收起图表
+	watch(() => props.channelType, () => {
+	  statsExpandedChannelIndex.value = null
+	  // 如果没有使用 dashboard props，则自己刷新
+	  if (!props.dashboardMetrics) {
+	    refreshMetrics()
+	  }
+	})
 
 // 获取渠道指标
 const getChannelMetrics = (channelIndex: number): ChannelMetrics | undefined => {
@@ -653,6 +751,45 @@ const refreshMetrics = async () => {
   }
 }
 
+const openCircuitLog = async (channelId: number, keyIndex: number, keyMask: string) => {
+  isCircuitLogOpen.value = true
+  isCircuitLogLoading.value = true
+  circuitLogTitle.value = `渠道 ${channelId + 1} · ${keyMask} · 最后失败日志`
+  circuitLog.value = ''
+  circuitLogError.value = ''
+
+  try {
+    const resp = await api.getKeyCircuitLog(props.channelType, channelId, keyIndex)
+    circuitLog.value = resp.log
+  } catch (e: any) {
+    circuitLogError.value = e?.message || '获取熔断日志失败'
+  } finally {
+    isCircuitLogLoading.value = false
+  }
+}
+
+	const resetKeyCircuit = async (channelId: number, keyIndex: number, keyMask: string) => {
+	  if (!confirm(`确认重置 ${keyMask} 的统计数据？此操作会清空该 Key 的请求/成功/失败等累计统计。`)) return
+	  try {
+	    await api.resetKeyCircuitState(props.channelType, channelId, keyIndex)
+	    emit('success', `已重置 ${keyMask}`)
+	    await refreshMetrics()
+	  } catch (e: any) {
+	    emit('error', e?.message || '重置失败')
+	  }
+	}
+
+	const resetKeyStatus = async (channelId: number, keyIndex: number, keyMask: string) => {
+	  if (!confirm(`确认重置 ${keyMask} 的状态？此操作会清除熔断/冷却状态，但保留累计统计。`)) return
+	  try {
+	    await api.resetKeyCircuitStatus(props.channelType, channelId, keyIndex)
+	    emit('success', `已重置状态 ${keyMask}`)
+	    await refreshMetrics()
+	  } catch (e: any) {
+	    emit('error', e?.message || '重置状态失败')
+	  }
+	}
+
 // 拖拽变更事件 - 自动保存顺序
 const onDragChange = () => {
   // 拖拽后自动保存顺序到后端
@@ -761,11 +898,11 @@ const setPromotion = async (channel: Channel) => {
 const canDeleteChannel = (channel: Channel): boolean => {
   // 统计当前 active 状态的渠道数量
   const activeCount = activeChannels.value.filter(
-    ch => ch.status === 'active' || ch.status === undefined || ch.status === ''
+    ch => ch.status === 'active' || !ch.status
   ).length
 
   // 如果要删除的是 active 渠道，且只剩一个 active，则不允许删除
-  const isActive = channel.status === 'active' || channel.status === undefined || channel.status === ''
+  const isActive = channel.status === 'active' || !channel.status
   if (isActive && activeCount <= 1) {
     return false
   }
@@ -869,25 +1006,6 @@ defineExpose({
   background: rgba(var(--v-theme-primary), 0.12);
   box-shadow: 6px 6px 0 0 rgba(255, 255, 255, 0.7);
   border-color: rgba(255, 255, 255, 0.7);
-}
-
-/* suspended 状态的视觉区分 */
-.channel-row.is-suspended {
-  background: rgba(var(--v-theme-warning), 0.1);
-  border-color: rgb(var(--v-theme-warning));
-  box-shadow: 4px 4px 0 0 rgb(var(--v-theme-on-surface));
-}
-.channel-row.is-suspended:hover {
-  background: rgba(var(--v-theme-warning), 0.15);
-  box-shadow: 6px 6px 0 0 rgb(var(--v-theme-on-surface));
-}
-
-.v-theme--dark .channel-row.is-suspended {
-  box-shadow: 4px 4px 0 0 rgba(255, 255, 255, 0.7);
-}
-
-.v-theme--dark .channel-row.is-suspended:hover {
-  box-shadow: 6px 6px 0 0 rgba(255, 255, 255, 0.7);
 }
 
 .channel-row.ghost {
@@ -1160,5 +1278,16 @@ defineExpose({
 .metrics-tooltip-row span:last-child {
   font-weight: 500;
   color: rgb(var(--v-theme-on-surface));
+}
+
+.key-metrics-panel {
+  background: rgba(var(--v-theme-surface-variant), 0.35);
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.key-metrics-table :deep(th),
+.key-metrics-table :deep(td) {
+  font-size: 14px;
 }
 </style>

@@ -135,6 +135,7 @@ func TestHandleSingleChannel_BaseURLFailover_DeprioritizeSaveErrorIsLogged(t *te
 		envCfg,
 		cfgManager,
 		sch,
+		nil,
 		sessionManager,
 		bodyBytes,
 		responsesReq,

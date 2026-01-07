@@ -879,6 +879,18 @@ func (m *MetricsManager) ResetKey(baseURL, apiKey string) {
 	}
 }
 
+// ResetKeyState 仅重置 Key 的熔断/连续失败状态，不清空累计统计与历史。
+func (m *MetricsManager) ResetKeyState(baseURL, apiKey string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	metricsKey := generateMetricsKey(baseURL, apiKey)
+	if metrics, exists := m.keyMetrics[metricsKey]; exists {
+		metrics.ConsecutiveFailures = 0
+		metrics.CircuitBrokenAt = nil
+	}
+}
+
 // ResetAll 重置所有指标
 func (m *MetricsManager) ResetAll() {
 	m.mu.Lock()
@@ -1117,7 +1129,19 @@ func (m *MetricsManager) ToResponseMultiURL(channelIndex int, baseURLs []string,
 				ConsecutiveFailures: agg.consecutiveFailures,
 				CircuitBroken:       agg.circuitBroken,
 			})
+			continue
 		}
+
+		// Key 尚无请求/指标时返回零值，确保前端能展示全部配置的 Key。
+		keyResponses = append(keyResponses, &KeyMetricsResponse{
+			KeyMask:             utils.MaskAPIKey(apiKey),
+			RequestCount:        0,
+			SuccessCount:        0,
+			FailureCount:        0,
+			SuccessRate:         100,
+			ConsecutiveFailures: 0,
+			CircuitBroken:       false,
+		})
 	}
 
 	// 计算聚合失败率
@@ -1216,7 +1240,19 @@ func (m *MetricsManager) ToResponse(channelIndex int, baseURL string, activeKeys
 				ConsecutiveFailures: metrics.ConsecutiveFailures,
 				CircuitBroken:       metrics.CircuitBrokenAt != nil,
 			})
+			continue
 		}
+
+		// 即使该 Key 尚无请求，也返回一条零值指标，确保前端能显示配置的 Key 列表。
+		keyResponses = append(keyResponses, &KeyMetricsResponse{
+			KeyMask:             utils.MaskAPIKey(apiKey),
+			RequestCount:        0,
+			SuccessCount:        0,
+			FailureCount:        0,
+			SuccessRate:         100,
+			ConsecutiveFailures: 0,
+			CircuitBroken:       false,
+		})
 	}
 
 	// 计算聚合失败率

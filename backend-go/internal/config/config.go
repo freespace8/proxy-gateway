@@ -231,6 +231,18 @@ func (cm *ConfigManager) IsKeyFailed(apiKey string) bool {
 	return cm.isKeyFailed(apiKey)
 }
 
+// ClearFailedKey 手动清理单个 Key 的冷却状态（用于管理员重置）
+func (cm *ConfigManager) ClearFailedKey(apiKey string) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	if _, exists := cm.failedKeysCache[apiKey]; !exists {
+		return
+	}
+	delete(cm.failedKeysCache, apiKey)
+	log.Printf("[Config-Key] 已清理失败密钥记录: %s", utils.MaskAPIKey(apiKey))
+}
+
 // clearFailedKeysForUpstream 清理指定渠道的所有失败 key 记录
 // 当渠道被删除时调用，避免内存泄漏和冷却状态残留
 func (cm *ConfigManager) clearFailedKeysForUpstream(upstream *UpstreamConfig) {

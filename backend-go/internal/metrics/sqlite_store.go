@@ -189,6 +189,15 @@ func initSchema(db *sql.DB) error {
 
 		CREATE INDEX IF NOT EXISTS idx_request_logs_request_id
 			ON request_logs(request_id);
+
+		-- Key 熔断日志（每个 key 仅保留 1 条，覆盖更新）
+		CREATE TABLE IF NOT EXISTS key_circuit_logs (
+			api_type TEXT NOT NULL,
+			key_id TEXT NOT NULL,
+			log TEXT NOT NULL,
+			updated_at INTEGER NOT NULL,
+			PRIMARY KEY(api_type, key_id)
+		);
 	`
 
 	_, err := db.Exec(schema)

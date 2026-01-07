@@ -236,9 +236,9 @@ func (h *Handler) Handle(c *gin.Context) {
 	isMultiSlot := channelScheduler.IsMultiSlotModeGemini()
 
 	if isMultiSlot {
-		handleMultiChannel(c, envCfg, cfgManager, channelScheduler, bodyBytes, &geminiReq, model, isStream, userID, startTime, reqCtx)
+		handleMultiChannel(c, envCfg, cfgManager, channelScheduler, h.sqliteStore, bodyBytes, &geminiReq, model, isStream, userID, startTime, reqCtx)
 	} else {
-		handleSingleChannel(c, envCfg, cfgManager, channelScheduler, bodyBytes, &geminiReq, model, isStream, startTime, reqCtx)
+		handleSingleChannel(c, envCfg, cfgManager, channelScheduler, h.sqliteStore, bodyBytes, &geminiReq, model, isStream, startTime, reqCtx)
 	}
 }
 
@@ -275,6 +275,7 @@ func handleMultiChannel(
 	envCfg *config.EnvConfig,
 	cfgManager *config.ConfigManager,
 	channelScheduler *scheduler.ChannelScheduler,
+	sqliteStore *metrics.SQLiteStore,
 	bodyBytes []byte,
 	geminiReq *types.GeminiRequest,
 	model string,
@@ -312,7 +313,7 @@ func handleMultiChannel(
 		upstreamOneKey := upstream.Clone()
 		upstreamOneKey.APIKeys = []string{selection.APIKey}
 		success, successKey, successBaseURLIdx, failoverErr, usage := tryChannelWithAllKeys(
-			c, envCfg, cfgManager, channelScheduler, upstreamOneKey, channelIndex,
+			c, envCfg, cfgManager, channelScheduler, sqliteStore, upstreamOneKey, channelIndex,
 			bodyBytes, geminiReq, model, isStream, startTime,
 			reqCtx,
 		)
@@ -364,6 +365,7 @@ func tryChannelWithAllKeys(
 	envCfg *config.EnvConfig,
 	cfgManager *config.ConfigManager,
 	channelScheduler *scheduler.ChannelScheduler,
+	sqliteStore *metrics.SQLiteStore,
 	upstream *config.UpstreamConfig,
 	channelIndex int,
 	bodyBytes []byte,
@@ -428,7 +430,9 @@ func tryChannelWithAllKeys(
 			providerReq, err := buildProviderRequest(c, upstream, currentBaseURL, apiKey, geminiReq, model, isStream)
 			if err != nil {
 				failedKeys[apiKey] = true
-				channelScheduler.RecordGeminiFailure(currentBaseURL, apiKey)
+				common.RecordFailureAndStoreLastFailureLog(sqliteStore, metricsManager, "gemini", currentBaseURL, apiKey, 0, nil, err, func() {
+					channelScheduler.RecordGeminiFailure(currentBaseURL, apiKey)
+				})
 				continue
 			}
 
@@ -436,7 +440,9 @@ func tryChannelWithAllKeys(
 			if err != nil {
 				failedKeys[apiKey] = true
 				cfgManager.MarkKeyAsFailed(apiKey)
-				channelScheduler.RecordGeminiFailure(currentBaseURL, apiKey)
+				common.RecordFailureAndStoreLastFailureLog(sqliteStore, metricsManager, "gemini", currentBaseURL, apiKey, 0, nil, err, func() {
+					channelScheduler.RecordGeminiFailure(currentBaseURL, apiKey)
+				})
 				channelScheduler.MarkURLFailure(channelIndex, currentBaseURL)
 				log.Printf("[Gemini-Key] 警告: API密钥失败: %v", err)
 				continue
@@ -451,7 +457,9 @@ func tryChannelWithAllKeys(
 				if shouldFailover {
 					failedKeys[apiKey] = true
 					cfgManager.MarkKeyAsFailed(apiKey)
-					channelScheduler.RecordGeminiFailure(currentBaseURL, apiKey)
+					common.RecordFailureAndStoreLastFailureLog(sqliteStore, metricsManager, "gemini", currentBaseURL, apiKey, resp.StatusCode, respBodyBytes, fmt.Errorf("上游错误: %d", resp.StatusCode), func() {
+						channelScheduler.RecordGeminiFailure(currentBaseURL, apiKey)
+					})
 					channelScheduler.MarkURLFailure(channelIndex, currentBaseURL)
 					log.Printf("[Gemini-Key] 警告: API密钥失败 (状态: %d)，尝试下一个密钥", resp.StatusCode)
 
@@ -467,7 +475,9 @@ func tryChannelWithAllKeys(
 				}
 
 				// 非 failover 错误
-				channelScheduler.RecordGeminiFailure(currentBaseURL, apiKey)
+				common.RecordFailureAndStoreLastFailureLog(sqliteStore, metricsManager, "gemini", currentBaseURL, apiKey, resp.StatusCode, respBodyBytes, fmt.Errorf("上游错误: %d", resp.StatusCode), func() {
+					channelScheduler.RecordGeminiFailure(currentBaseURL, apiKey)
+				})
 				if reqCtx != nil {
 					reqCtx.success = false
 					reqCtx.errorMsg = truncateErrorMessage(string(respBodyBytes))
@@ -507,6 +517,7 @@ func handleSingleChannel(
 	envCfg *config.EnvConfig,
 	cfgManager *config.ConfigManager,
 	channelScheduler *scheduler.ChannelScheduler,
+	sqliteStore *metrics.SQLiteStore,
 	bodyBytes []byte,
 	geminiReq *types.GeminiRequest,
 	model string,
@@ -599,7 +610,9 @@ func handleSingleChannel(
 			if err != nil {
 				lastError = err
 				failedKeys[apiKey] = true
-				channelScheduler.RecordGeminiFailure(currentBaseURL, apiKey)
+				common.RecordFailureAndStoreLastFailureLog(sqliteStore, metricsManager, "gemini", currentBaseURL, apiKey, 0, nil, err, func() {
+					channelScheduler.RecordGeminiFailure(currentBaseURL, apiKey)
+				})
 				continue
 			}
 
@@ -608,7 +621,9 @@ func handleSingleChannel(
 				lastError = err
 				failedKeys[apiKey] = true
 				cfgManager.MarkKeyAsFailed(apiKey)
-				channelScheduler.RecordGeminiFailure(currentBaseURL, apiKey)
+				common.RecordFailureAndStoreLastFailureLog(sqliteStore, metricsManager, "gemini", currentBaseURL, apiKey, 0, nil, err, func() {
+					channelScheduler.RecordGeminiFailure(currentBaseURL, apiKey)
+				})
 				log.Printf("[Gemini-Key] 警告: API密钥失败: %v", err)
 				continue
 			}
@@ -623,7 +638,9 @@ func handleSingleChannel(
 					lastError = fmt.Errorf("上游错误: %d", resp.StatusCode)
 					failedKeys[apiKey] = true
 					cfgManager.MarkKeyAsFailed(apiKey)
-					channelScheduler.RecordGeminiFailure(currentBaseURL, apiKey)
+					common.RecordFailureAndStoreLastFailureLog(sqliteStore, metricsManager, "gemini", currentBaseURL, apiKey, resp.StatusCode, respBodyBytes, lastError, func() {
+						channelScheduler.RecordGeminiFailure(currentBaseURL, apiKey)
+					})
 					log.Printf("[Gemini-Key] 警告: API密钥失败 (状态: %d)，尝试下一个密钥", resp.StatusCode)
 
 					lastFailoverError = &common.FailoverError{
@@ -637,7 +654,9 @@ func handleSingleChannel(
 					continue
 				}
 
-				channelScheduler.RecordGeminiFailure(currentBaseURL, apiKey)
+				common.RecordFailureAndStoreLastFailureLog(sqliteStore, metricsManager, "gemini", currentBaseURL, apiKey, resp.StatusCode, respBodyBytes, fmt.Errorf("上游错误: %d", resp.StatusCode), func() {
+					channelScheduler.RecordGeminiFailure(currentBaseURL, apiKey)
+				})
 				if reqCtx != nil {
 					reqCtx.success = false
 					reqCtx.errorMsg = truncateErrorMessage(string(respBodyBytes))

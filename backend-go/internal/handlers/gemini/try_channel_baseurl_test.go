@@ -100,6 +100,7 @@ func TestTryChannelWithAllKeys_BaseURLFailover(t *testing.T) {
 		envCfg,
 		cfgManager,
 		sch,
+		nil,
 		&cfg.GeminiUpstream[0],
 		0,
 		bodyBytes,

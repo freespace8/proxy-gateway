@@ -54,8 +54,8 @@ const STATUS_CONFIG: Record<string, { icon: string; color: string; label: string
   },
   suspended: {
     icon: 'mdi-pause-circle',
-    color: 'warning',
-    label: '熔断',
+    color: 'grey',
+    label: '暂停',
     class: 'status-suspended'
   },
   disabled: {
@@ -175,24 +175,23 @@ const formatTime = (dateStr: string): string => {
 }
 
 .status-suspended .badge-content {
-  background: #fef3c7;
-  color: #92400e;
-  border-color: #92400e;
-  animation: pixel-blink 1.5s step-end infinite;
+  background: #e5e7eb;
+  color: #6b7280;
+  border-color: #6b7280;
 }
 
 .status-suspended .badge-content .status-icon {
-  color: #92400e !important;
+  color: #6b7280 !important;
 }
 
 .v-theme--dark .status-suspended .badge-content {
-  background: #92400e;
-  color: #fef3c7;
-  border-color: #fef3c7;
+  background: #374151;
+  color: #e5e7eb;
+  border-color: rgba(255, 255, 255, 0.6);
 }
 
 .v-theme--dark .status-suspended .badge-content .status-icon {
-  color: #fef3c7 !important;
+  color: #e5e7eb !important;
 }
 
 .status-disabled .badge-content {
@@ -292,21 +291,10 @@ const formatTime = (dateStr: string): string => {
     animation: pixel-pulse 1s step-end infinite;
   }
 
-  /* 熔断状态 - 橙色像素点 */
+  /* 暂停状态 - 灰色像素点（不闪烁） */
   .status-suspended .badge-content .v-icon {
-    background: #f59e0b;
-    border: 2px solid #92400e;
-  }
-
-  .status-suspended .badge-content .v-icon::after {
-    content: '';
-    position: absolute;
-    top: -3px;
-    left: -3px;
-    width: 14px;
-    height: 14px;
-    background: rgba(245, 158, 11, 0.3);
-    animation: pixel-pulse 0.75s step-end infinite;
+    background: #94a3b8;
+    border: 2px solid #475569;
   }
 
   /* 禁用状态 - 灰色像素点 */

@@ -208,9 +208,9 @@
         <v-row class="mb-6 stat-cards-row">
           <v-col cols="6" sm="4">
             <div class="stat-card stat-card-info">
-              <div class="stat-card-icon">
-                <v-icon size="28">mdi-server-network</v-icon>
-              </div>
+	              <div class="stat-card-icon">
+	                <v-icon size="20">mdi-server-network</v-icon>
+	              </div>
               <div class="stat-card-content">
                 <div class="stat-card-value">{{ currentChannelsData.channels?.length || 0 }}</div>
                 <div class="stat-card-label">总渠道数</div>
@@ -222,9 +222,9 @@
 
           <v-col cols="6" sm="4">
             <div class="stat-card stat-card-success">
-              <div class="stat-card-icon">
-                <v-icon size="28">mdi-check-circle</v-icon>
-              </div>
+	              <div class="stat-card-icon">
+	                <v-icon size="20">mdi-check-circle</v-icon>
+	              </div>
               <div class="stat-card-content">
                 <div class="stat-card-value">
                   {{ activeChannelCount }}<span class="stat-card-total">/{{ failoverChannelCount }}</span>
@@ -238,8 +238,8 @@
 
           <v-col cols="6" sm="4">
             <div class="stat-card" :class="systemStatus === 'running' ? 'stat-card-emerald' : 'stat-card-error'">
-              <div class="stat-card-icon" :class="{ 'pulse-animation': systemStatus === 'running' }">
-                <v-icon size="28">{{ systemStatus === 'running' ? 'mdi-heart-pulse' : 'mdi-alert-circle' }}</v-icon>
+              <div class="stat-card-icon">
+                <v-icon size="20">{{ systemStatus === 'running' ? 'mdi-heart-pulse' : 'mdi-alert-circle' }}</v-icon>
               </div>
               <div class="stat-card-content">
                 <div class="stat-card-value">{{ systemStatusText }}</div>
@@ -437,7 +437,12 @@ let autoRefreshTimer: ReturnType<typeof setInterval> | null = null
 const AUTO_REFRESH_INTERVAL = 2000 // 2秒
 
 // 响应式数据
-const activeTab = ref<'messages' | 'responses' | 'gemini'>('messages') // Tab 切换状态
+type ApiTab = 'messages' | 'responses' | 'gemini'
+const TAB_STORAGE_KEY = 'activeApiTab'
+
+const isValidApiTab = (v: unknown): v is ApiTab => v === 'messages' || v === 'responses' || v === 'gemini'
+
+const activeTab = ref<ApiTab>('messages') // Tab 切换状态
 const channelsData = ref<ChannelsResponse>({ channels: [], current: -1, loadBalance: 'round-robin' })
 const responsesChannelsData = ref<ChannelsResponse>({ channels: [], current: -1, loadBalance: 'round-robin' }) // Responses渠道数据
 const geminiChannelsData = ref<ChannelsResponse>({ channels: [], current: -1, loadBalance: 'round-robin' }) // Gemini渠道数据
@@ -583,7 +588,8 @@ const mergeChannelsWithLocalData = (newChannels: Channel[], existingChannels: Ch
       return {
         ...newCh,
         latency: existingCh.latency,
-        latencyTestTime: existingCh.latencyTestTime
+        latencyTestTime: existingCh.latencyTestTime,
+        health: existingCh.health
       }
     }
     return newCh
@@ -792,7 +798,7 @@ const pingChannel = async (channelId: number) => {
     if (channel) {
       channel.latency = result.latency
       channel.latencyTestTime = Date.now()  // 记录测试时间，用于 5 分钟后清除
-      channel.status = result.success ? 'healthy' : 'error'
+      channel.health = result.success ? 'healthy' : 'error'
     }
     // 不再使用 Toast，延迟结果直接显示在渠道列表中
   } catch (error) {
@@ -819,7 +825,7 @@ const pingAllChannels = async () => {
       if (channel) {
         channel.latency = result.latency
         channel.latencyTestTime = now  // 记录测试时间，用于 5 分钟后清除
-        channel.status = result.status as 'healthy' | 'error'
+        channel.health = result.status as 'healthy' | 'error'
       }
     })
     // 不再使用 Toast，延迟结果直接显示在渠道列表中
@@ -911,6 +917,7 @@ const authKeyInput = ref('')
 const authLoading = ref(false)
 const isAutoAuthenticating = ref(true) // 初始化为true，防止登录框闪现
 const isInitialized = ref(false) // 添加初始化完成标志
+const shouldPromptForAuth = ref(false) // 仅在鉴权失败/需要权限时弹出登录框
 
 // 认证尝试限制
 const authAttempts = ref(0)
@@ -921,7 +928,7 @@ const authLockoutTime = ref<Date | null>(null)
 const showAuthDialog = computed({
   get: () => {
     // 只有在初始化完成后，且未认证，且不在自动认证中时，才显示对话框
-    return isInitialized.value && !isAuthenticated.value && !isAutoAuthenticating.value
+    return isInitialized.value && !isAuthenticated.value && !isAutoAuthenticating.value && shouldPromptForAuth.value
   },
   set: () => {} // 防止外部修改，认证状态只能通过内部逻辑控制
 })
@@ -936,8 +943,9 @@ const initializeAuth = () => {
 const autoAuthenticate = async () => {
   const savedKey = initializeAuth()
   if (!savedKey) {
-    // 没有保存的密钥，显示登录对话框
-    authError.value = '请输入访问密钥以继续'
+    // 没有保存的密钥：默认不弹窗，等到需要权限/鉴权失败时再提示
+    shouldPromptForAuth.value = false
+    authError.value = ''
     isAutoAuthenticating.value = false
     isInitialized.value = true
     return false
@@ -960,9 +968,10 @@ const autoAuthenticate = async () => {
     // 清除无效的密钥
     api.clearAuth()
 
-    // 显示登录对话框，提示用户重新输入
+    // 自动认证失败：提示用户重新输入
     isAuthenticated.value = false
     authError.value = '保存的访问密钥已失效，请重新输入'
+    shouldPromptForAuth.value = true
 
     return false
   } finally {
@@ -976,6 +985,7 @@ const setAuthKey = (key: string) => {
   api.setApiKey(key)
   localStorage.setItem('proxyAccessKey', key)
   isAuthenticated.value = true
+  shouldPromptForAuth.value = false
   authError.value = ''
   // 重新加载数据
   refreshChannels()
@@ -1044,7 +1054,8 @@ const handleAuthSubmit = async () => {
 const handleLogout = () => {
   api.clearAuth()
   isAuthenticated.value = false
-  authError.value = '请输入访问密钥以继续'
+  shouldPromptForAuth.value = false
+  authError.value = ''
   channelsData.value = { channels: [], current: 0, loadBalance: 'failover' }
   showToast('已安全注销', 'info')
 }
@@ -1054,6 +1065,7 @@ const handleAuthError = (error: any) => {
   if (error.message && error.message.includes('认证失败')) {
     isAuthenticated.value = false
     authError.value = '访问密钥无效或已过期，请重新输入'
+    shouldPromptForAuth.value = true
   } else {
     showToast(`操作失败: ${error instanceof Error ? error.message : '未知错误'}`, 'error')
   }
@@ -1107,6 +1119,12 @@ onMounted(async () => {
   // 加载保存的暗色模式偏好
   const savedMode = (localStorage.getItem('theme') as 'light' | 'dark' | 'auto') || 'auto'
   setDarkMode(savedMode)
+
+  // 恢复上次选中的 API 分页（Claude/Codex/Gemini）
+  const savedTab = localStorage.getItem(TAB_STORAGE_KEY)
+  if (isValidApiTab(savedTab)) {
+    activeTab.value = savedTab
+  }
 
   // 监听系统主题变化
   const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
@@ -1203,6 +1221,7 @@ const stopAutoRefresh = () => {
 
 // 监听 Tab 切换，刷新对应数据
 watch(activeTab, async () => {
+  localStorage.setItem(TAB_STORAGE_KEY, activeTab.value)
   if (isAuthenticated.value) {
     // 使用 dashboard 接口刷新所有数据
     try {
@@ -1456,14 +1475,14 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 16px;
-  padding: 20px;
+  padding: 12px;
   margin: 2px;
   background: rgb(var(--v-theme-surface));
   border: 2px solid rgb(var(--v-theme-on-surface));
   box-shadow: 6px 6px 0 0 rgb(var(--v-theme-on-surface));
   transition: all 0.1s ease;
   overflow: hidden;
-  min-height: 100px;
+  min-height: 72px;
 }
 .stat-card:hover {
   transform: translate(-2px, -2px);
@@ -1491,8 +1510,8 @@ onUnmounted(() => {
 }
 
 .stat-card-icon {
-  width: 56px;
-  height: 56px;
+  width: 40px;
+  height: 40px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1516,7 +1535,7 @@ onUnmounted(() => {
 }
 
 .stat-card-value {
-  font-size: 1.75rem;
+  font-size: 1.25rem;
   font-weight: 700;
   line-height: 1.2;
   letter-spacing: -0.5px;
@@ -1529,7 +1548,7 @@ onUnmounted(() => {
 }
 
 .stat-card-label {
-  font-size: 0.875rem;
+  font-size: 0.75rem;
   font-weight: 600;
   margin-top: 2px;
   opacity: 0.85;
@@ -1537,7 +1556,7 @@ onUnmounted(() => {
 }
 
 .stat-card-desc {
-  font-size: 0.75rem;
+  font-size: 0.6875rem;
   opacity: 0.6;
   margin-top: 2px;
   white-space: nowrap;
@@ -2052,21 +2071,6 @@ onUnmounted(() => {
   /* 隐藏分割线 */
   .channel-orchestration .v-divider {
     display: none !important;
-  }
-}
-
-/* 心跳动画 - 简化为简单闪烁 */
-.pulse-animation {
-  animation: pixel-blink 1s step-end infinite;
-}
-
-@keyframes pixel-blink {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.7;
   }
 }
 

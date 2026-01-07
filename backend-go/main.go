@@ -281,6 +281,20 @@ func main() {
 		responsesAPI.GET("/logs", requestLogsHandler.GetLogs)
 		geminiAPI.GET("/logs", requestLogsHandler.GetLogs)
 
+		// Key 熔断日志 & 重置（每个 key 仅保留 1 条熔断时日志）
+		// 注意：/keys/:apiKey 已用于按 key 字符串操作；此处用 /keys/index/:keyIndex 避免 Gin 路由通配冲突
+		messagesAPI.GET("/channels/:id/keys/index/:keyIndex/circuit-log", handlers.GetKeyCircuitLog(metricsStore, cfgManager, "messages"))
+		responsesAPI.GET("/channels/:id/keys/index/:keyIndex/circuit-log", handlers.GetKeyCircuitLog(metricsStore, cfgManager, "responses"))
+		geminiAPI.GET("/channels/:id/keys/index/:keyIndex/circuit-log", handlers.GetKeyCircuitLog(metricsStore, cfgManager, "gemini"))
+
+		messagesAPI.POST("/channels/:id/keys/index/:keyIndex/reset", handlers.ResetKeyCircuitState(channelScheduler, cfgManager, "messages"))
+		responsesAPI.POST("/channels/:id/keys/index/:keyIndex/reset", handlers.ResetKeyCircuitState(channelScheduler, cfgManager, "responses"))
+		geminiAPI.POST("/channels/:id/keys/index/:keyIndex/reset", handlers.ResetKeyCircuitState(channelScheduler, cfgManager, "gemini"))
+
+		messagesAPI.POST("/channels/:id/keys/index/:keyIndex/reset-state", handlers.ResetKeyCircuitStatus(channelScheduler, cfgManager, "messages"))
+		responsesAPI.POST("/channels/:id/keys/index/:keyIndex/reset-state", handlers.ResetKeyCircuitStatus(channelScheduler, cfgManager, "responses"))
+		geminiAPI.POST("/channels/:id/keys/index/:keyIndex/reset-state", handlers.ResetKeyCircuitStatus(channelScheduler, cfgManager, "gemini"))
+
 		// 实时请求 API
 		liveRequestsHandler := handlers.NewLiveRequestsHandler(liveRequestManager)
 		messagesAPI.GET("/live", liveRequestsHandler.GetLiveRequests)

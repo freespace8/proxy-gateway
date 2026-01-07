@@ -315,6 +315,9 @@ func TestMetricsManager_BasicAndHistoryPaths(t *testing.T) {
 	if resp == nil || resp.ChannelIndex != 7 || resp.Latency != 123 {
 		t.Fatalf("ToResponse() = %+v, want channelIndex=7 latency=123", resp)
 	}
+	if len(resp.KeyMetrics) != 2 {
+		t.Fatalf("ToResponse().KeyMetrics len=%d, want 2", len(resp.KeyMetrics))
+	}
 	if resp.SuccessRate < 0 || resp.SuccessRate > 100 {
 		t.Fatalf("ToResponse().SuccessRate=%f, want in [0,100]", resp.SuccessRate)
 	}
@@ -334,6 +337,21 @@ func TestMetricsManager_BasicAndHistoryPaths(t *testing.T) {
 	m.ResetKey(baseURL, key1)
 	if m.GetKeyMetrics(baseURL, key1) == nil {
 		t.Fatalf("ResetKey() should keep key entry (copy), want non-nil metrics")
+	}
+
+	// ResetKeyState：仅重置熔断状态，不清空累计统计。
+	m.RecordFailure(baseURL, key2)
+	m.mu.Lock()
+	mk2 := generateMetricsKey(baseURL, key2)
+	if km2, ok := m.keyMetrics[mk2]; ok {
+		now := time.Now()
+		km2.CircuitBrokenAt = &now
+	}
+	m.mu.Unlock()
+	m.ResetKeyState(baseURL, key2)
+	km2 := m.GetKeyMetrics(baseURL, key2)
+	if km2 == nil || km2.CircuitBrokenAt != nil || km2.ConsecutiveFailures != 0 {
+		t.Fatalf("ResetKeyState() failed, got=%+v", km2)
 	}
 	m.ResetAll()
 	if len(m.GetAllKeyMetrics()) != 0 {

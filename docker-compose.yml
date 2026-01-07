@@ -15,9 +15,9 @@ services:
       - '2010:3000'
     volumes:
       # 配置目录持久化
-      - ./.config:/app/.config
+      - ./backend-go/.config:/app/.config
       # 可选：日志持久化
-      # - ./logs:/app/logs
+      # - ./backend-go/logs:/app/logs
     environment:
       # 基础配置
       - ENV=development

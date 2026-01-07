@@ -63,10 +63,30 @@ func (p *ResponsesProvider) ConvertToProviderRequest(
 			return nil, bodyBytes, fmt.Errorf("解析 Responses 请求失败: %w", err)
 		}
 
+		if p.SessionManager == nil {
+			return nil, bodyBytes, fmt.Errorf("SessionManager 未初始化")
+		}
+
 		// 获取或创建会话
-		sess, err := p.SessionManager.GetOrCreateSession(responsesReq.PreviousResponseID)
-		if err != nil {
-			return nil, bodyBytes, fmt.Errorf("获取会话失败: %w", err)
+		var sess *session.Session
+		if c != nil && p.SessionManager != nil {
+			if v, ok := c.Get(session.ContextKeySessionID); ok {
+				if sessionID, ok := v.(string); ok && sessionID != "" {
+					if s, err := p.SessionManager.GetSession(sessionID); err == nil {
+						sess = s
+					}
+				}
+			}
+		}
+		if sess == nil {
+			var err error
+			sess, err = p.SessionManager.GetOrCreateSession(responsesReq.PreviousResponseID)
+			if err != nil {
+				return nil, bodyBytes, fmt.Errorf("获取会话失败: %w", err)
+			}
+			if c != nil {
+				c.Set(session.ContextKeySessionID, sess.ID)
+			}
 		}
 
 		// 模型重定向

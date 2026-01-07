@@ -229,17 +229,30 @@ func (h *Handler) Handle(c *gin.Context) {
 	reqCtx.isStreaming = responsesReq.Stream
 	reqCtx.updateLive()
 
-	// 提取对话标识用于 Trace 亲和性
-	userID := common.ExtractConversationID(c, bodyBytes)
+	// 对话级路由：优先使用本地 SessionID（稳定、对话级），避免缺少对话标识时退化到固定 key。
+	// 若 session 不可用（如 invalid previous_response_id），则回退到请求内对话标识或请求级随机路由。
+	routingKey := ""
+	if sessionManager != nil && (responsesReq.Store == nil || *responsesReq.Store) {
+		if sess, err := sessionManager.GetOrCreateSession(responsesReq.PreviousResponseID); err == nil && sess != nil {
+			c.Set(session.ContextKeySessionID, sess.ID)
+			routingKey = sess.ID
+		}
+	}
+	if routingKey == "" {
+		routingKey = common.ExtractConversationID(c, bodyBytes)
+	}
+	if routingKey == "" {
+		routingKey = uuid.NewString()
+	}
 
 	// 记录原始请求信息（仅在入口处记录一次）
 	common.LogOriginalRequest(c, bodyBytes, envCfg, "Responses")
 
-	// 多槽位模式：(渠道,key) 同层级负载均衡，并按 prompt_cache_key 做粘性
+	// 多槽位模式：(渠道,key) 同层级负载均衡，并按 routingKey 做粘性
 	isMultiSlot := channelScheduler.IsMultiSlotMode(true) // true = isResponses
 
 	if isMultiSlot {
-		handleMultiChannel(c, envCfg, cfgManager, channelScheduler, h.sqliteStore, sessionManager, bodyBytes, responsesReq, userID, startTime, billingHandler, billingCtx, reqCtx)
+		handleMultiChannel(c, envCfg, cfgManager, channelScheduler, h.sqliteStore, sessionManager, bodyBytes, responsesReq, routingKey, startTime, billingHandler, billingCtx, reqCtx)
 	} else {
 		handleSingleChannel(c, envCfg, cfgManager, channelScheduler, h.sqliteStore, sessionManager, bodyBytes, responsesReq, startTime, billingHandler, billingCtx, reqCtx)
 	}
@@ -255,7 +268,7 @@ func handleMultiChannel(
 	sessionManager *session.SessionManager,
 	bodyBytes []byte,
 	responsesReq types.ResponsesRequest,
-	userID string,
+	routingKey string,
 	startTime time.Time,
 	billingHandler *billing.Handler,
 	billingCtx *billing.RequestContext,
@@ -268,7 +281,7 @@ func handleMultiChannel(
 	maxSlotAttempts := channelScheduler.GetActiveSlotCount(true) // true = isResponses
 
 	for slotAttempt := 0; slotAttempt < maxSlotAttempts; slotAttempt++ {
-		selection, err := channelScheduler.SelectSlot(c.Request.Context(), userID, failedSlots, true)
+		selection, err := channelScheduler.SelectSlot(c.Request.Context(), routingKey, failedSlots, true)
 		if err != nil {
 			lastError = err
 			break
@@ -319,7 +332,7 @@ func handleMultiChannel(
 				reqCtx.success = true
 				reqCtx.errorMsg = ""
 			}
-			channelScheduler.SetTraceAffinitySlot(userID, channelIndex, selection.KeyIndex)
+			channelScheduler.SetTraceAffinitySlot(routingKey, channelIndex, selection.KeyIndex)
 			return
 		}
 
@@ -848,19 +861,41 @@ func handleSuccess(
 	patchResponsesUsage(responsesResp, originalRequestJSON, envCfg)
 
 	// 更新会话
-	if originalReq.Store == nil || *originalReq.Store {
-		sess, err := sessionManager.GetOrCreateSession(originalReq.PreviousResponseID)
-		if err == nil {
+	if sessionManager != nil && (originalReq.Store == nil || *originalReq.Store) {
+		var sess *session.Session
+
+		if v, ok := c.Get(session.ContextKeySessionID); ok {
+			if sessionID, ok := v.(string); ok && sessionID != "" {
+				if s, err := sessionManager.GetSession(sessionID); err == nil {
+					sess = s
+				}
+			}
+		}
+
+		if sess == nil {
+			if s, err := sessionManager.GetOrCreateSession(originalReq.PreviousResponseID); err == nil {
+				sess = s
+				c.Set(session.ContextKeySessionID, sess.ID)
+			}
+		}
+
+		if sess != nil {
 			inputItems, _ := parseInputToItems(originalReq.Input)
 			for _, item := range inputItems {
-				sessionManager.AppendMessage(sess.ID, item, 0)
+				if err := sessionManager.AppendMessage(sess.ID, item, 0); err != nil {
+					log.Printf("[Session-Append] 警告: 追加输入消息失败: %v", err)
+				}
 			}
 
 			for _, item := range responsesResp.Output {
-				sessionManager.AppendMessage(sess.ID, item, responsesResp.Usage.TotalTokens)
+				if err := sessionManager.AppendMessage(sess.ID, item, responsesResp.Usage.TotalTokens); err != nil {
+					log.Printf("[Session-Append] 警告: 追加输出消息失败: %v", err)
+				}
 			}
 
-			sessionManager.UpdateLastResponseID(sess.ID, responsesResp.ID)
+			if err := sessionManager.UpdateLastResponseID(sess.ID, responsesResp.ID); err != nil {
+				log.Printf("[Session-Update] 警告: 更新 LastResponseID 失败: %v", err)
+			}
 			sessionManager.RecordResponseMapping(responsesResp.ID, sess.ID)
 
 			if sess.LastResponseID != "" {

@@ -2,6 +2,8 @@ package responses
 
 import (
 	"bytes"
+	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -149,9 +151,27 @@ func TestResponsesHandler_SingleChannel_FailoverKeyThenSuccessAndDeprioritize(t 
 	r := gin.New()
 	r.POST("/v1/responses", NewHandler(envCfg, cfgManager, sessionManager, sch, nil, nil, nil, nil))
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewBufferString(`{"model":"gpt-4o","input":"hello"}`))
+	// 固定路由到 bad key，确保覆盖“key 失败->切到另一个 key”路径（避免 sessionID 随机导致用例不稳定）。
+	convID := ""
+	for i := 0; i < 1024; i++ {
+		candidate := fmt.Sprintf("cid-%d", i)
+		selection, err := sch.SelectSlot(context.Background(), candidate, map[string]bool{}, true)
+		if err != nil {
+			t.Fatalf("SelectSlot err: %v", err)
+		}
+		if selection.APIKey == "rk-bad" {
+			convID = candidate
+			break
+		}
+	}
+	if convID == "" {
+		t.Fatalf("failed to find Conversation_id that routes to rk-bad")
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewBufferString(`{"model":"gpt-4o","input":"hello","store":false}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-api-key", envCfg.ProxyAccessKey)
+	req.Header.Set("Conversation_id", convID)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 

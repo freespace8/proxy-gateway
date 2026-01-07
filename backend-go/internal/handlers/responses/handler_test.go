@@ -2,7 +2,9 @@ package responses
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -141,6 +143,79 @@ func TestResponsesHandler_SingleChannel_Success(t *testing.T) {
 	}
 }
 
+func TestResponsesHandler_OpenAI_NonStream_DoesNotDoubleCreateSession(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+  "id":"chatcmpl_1",
+  "object":"chat.completion",
+  "created":123,
+  "model":"gpt-4o",
+  "choices":[{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}],
+  "usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}
+}`))
+	}))
+	defer upstream.Close()
+
+	cfg := config.Config{
+		Upstream: []config.UpstreamConfig{},
+		ResponsesUpstream: []config.UpstreamConfig{
+			{
+				Name:        "openai",
+				BaseURL:     upstream.URL,
+				APIKeys:     []string{"rk1"},
+				ServiceType: "openai",
+				Status:      "active",
+				Priority:    1,
+			},
+		},
+		LoadBalance:          "failover",
+		ResponsesLoadBalance: "failover",
+		GeminiLoadBalance:    "failover",
+		FuzzyModeEnabled:     true,
+	}
+
+	cfgManager, cleanupCfg := createTestConfigManager(t, cfg)
+	defer cleanupCfg()
+
+	sch, cleanupSch := createTestScheduler(t, cfgManager)
+	defer cleanupSch()
+
+	sessionManager := session.NewSessionManager(time.Hour, 100, 100000)
+
+	envCfg := &config.EnvConfig{
+		ProxyAccessKey:     "secret",
+		MaxRequestBodySize: 1024 * 1024,
+		Env:                "development",
+		EnableResponseLogs: false,
+	}
+
+	r := gin.New()
+	r.POST("/v1/responses", NewHandler(envCfg, cfgManager, sessionManager, sch, nil, nil, nil, nil))
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewBufferString(`{"model":"gpt-4o","input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-api-key", envCfg.ProxyAccessKey)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+
+	stats := sessionManager.GetStats()
+	gotSessions, _ := stats["total_sessions"].(int)
+	if gotSessions != 1 {
+		t.Fatalf("total_sessions=%d want 1 (should reuse the same session across request lifecycle)", gotSessions)
+	}
+}
+
 func TestResponsesHandler_MultiChannel_FailoverToNextChannel(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -218,10 +293,28 @@ func TestResponsesHandler_MultiChannel_FailoverToNextChannel(t *testing.T) {
 	r := gin.New()
 	r.POST("/v1/responses", h)
 
-	reqBody := `{"model":"gpt-4o","input":"hello"}`
+	// 固定路由到 bad 渠道，确保覆盖“失败->下一个渠道”路径（避免 sessionID 随机导致用例不稳定）。
+	convID := ""
+	for i := 0; i < 1024; i++ {
+		candidate := fmt.Sprintf("cid-%d", i)
+		selection, err := sch.SelectSlot(context.Background(), candidate, map[string]bool{}, true)
+		if err != nil {
+			t.Fatalf("SelectSlot err: %v", err)
+		}
+		if selection.ChannelIndex == 0 {
+			convID = candidate
+			break
+		}
+	}
+	if convID == "" {
+		t.Fatalf("failed to find Conversation_id that routes to channel 0")
+	}
+
+	reqBody := `{"model":"gpt-4o","input":"hello","store":false}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewBufferString(reqBody))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-api-key", envCfg.ProxyAccessKey)
+	req.Header.Set("Conversation_id", convID)
 	w := httptest.NewRecorder()
 
 	r.ServeHTTP(w, req)
@@ -331,4 +424,3 @@ func TestParseInputToItems(t *testing.T) {
 		}
 	})
 }
-

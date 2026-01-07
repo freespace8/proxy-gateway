@@ -11,6 +11,8 @@ import (
 	"github.com/BenedictKing/claude-proxy/internal/types"
 )
 
+const ContextKeySessionID = "__proxy_gateway_session_id"
+
 // Session 会话数据结构
 type Session struct {
 	ID             string                // sess_xxxxx

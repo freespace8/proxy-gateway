@@ -615,10 +615,14 @@ func extractSystemText(system interface{}) string {
 		return str
 	}
 
-	// 可能是数组
+	// 可能是单个对象或数组
 	arr, ok := system.([]interface{})
 	if !ok {
-		return ""
+		if obj, ok := system.(map[string]interface{}); ok {
+			arr = []interface{}{obj}
+		} else {
+			return ""
+		}
 	}
 
 	parts := []string{}

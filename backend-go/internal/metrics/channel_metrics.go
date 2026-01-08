@@ -92,7 +92,7 @@ type MetricsManager struct {
 func NewMetricsManager() *MetricsManager {
 	m := &MetricsManager{
 		keyMetrics:          make(map[string]*KeyMetrics),
-		windowSize:          10,               // 默认基于最近 10 次请求计算失败率
+		windowSize:          50,               // 默认基于最近 50 次请求计算失败率
 		failureThreshold:    0.5,              // 默认 50% 失败率阈值
 		circuitRecoveryTime: 15 * time.Minute, // 默认 15 分钟自动恢复
 		stopCh:              make(chan struct{}),

@@ -570,7 +570,8 @@ func TestSQLiteStore_WriteBufferFailurePaths(t *testing.T) {
 }
 
 func TestMetricsManager_IsChannelHealthyWithKeys(t *testing.T) {
-	m := NewMetricsManager()
+	// 使用显式配置以确保测试独立于默认值
+	m := NewMetricsManagerWithConfig(10, 0.5)
 	t.Cleanup(m.Stop)
 
 	baseURL := "https://example.com"
@@ -583,7 +584,7 @@ func TestMetricsManager_IsChannelHealthyWithKeys(t *testing.T) {
 		t.Fatalf("IsChannelHealthyWithKeys(no data)=false, want true")
 	}
 
-	// NewMetricsManager 默认 windowSize=10，minRequests=max(3,10/2)=5。
+	// windowSize=10，minRequests=max(3,10/2)=5。
 	for i := 0; i < 4; i++ {
 		m.RecordFailure(baseURL, apiKey)
 	}

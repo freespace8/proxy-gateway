@@ -68,7 +68,7 @@ func NewEnvConfig() *EnvConfig {
 		EnableCORS:         getEnv("ENABLE_CORS", "true") != "false",
 		CORSOrigin:         getEnv("CORS_ORIGIN", "*"),
 		// 指标配置
-		MetricsWindowSize:       getEnvAsInt("METRICS_WINDOW_SIZE", 10),
+		MetricsWindowSize:       getEnvAsInt("METRICS_WINDOW_SIZE", 50),
 		MetricsFailureThreshold: getEnvAsFloat("METRICS_FAILURE_THRESHOLD", 0.5),
 		// 指标持久化配置
 		MetricsPersistenceEnabled: getEnv("METRICS_PERSISTENCE_ENABLED", "true") != "false",

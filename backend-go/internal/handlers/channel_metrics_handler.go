@@ -27,6 +27,20 @@ func GetChannelMetricsWithConfig(metricsManager *metrics.MetricsManager, cfgMana
 			// 使用多 URL 聚合方法获取渠道指标（支持 failover 多端点场景）
 			resp := metricsManager.ToResponseMultiURL(i, upstream.GetAllBaseURLs(), upstream.APIKeys, 0)
 
+			// 综合两套熔断机制：ConfigManager 的冷却状态 + MetricsManager 的熔断状态
+			// 更新 keyMetrics 中每个 key 的熔断状态
+			if resp.KeyMetrics != nil {
+				for idx, km := range resp.KeyMetrics {
+					if idx < len(upstream.APIKeys) {
+						apiKey := upstream.APIKeys[idx]
+						// 任一熔断机制触发都算熔断
+						if cfgManager.IsKeyFailed(apiKey) {
+							km.CircuitBroken = true
+						}
+					}
+				}
+			}
+
 			item := gin.H{
 				"channelIndex":        i,
 				"channelName":         upstream.Name,
@@ -580,6 +594,18 @@ func GetChannelDashboard(cfgManager *config.ConfigManager, sch *scheduler.Channe
 		for i, upstream := range upstreams {
 			resp := metricsManager.ToResponseMultiURL(i, upstream.GetAllBaseURLs(), upstream.APIKeys, 0)
 
+			// 综合两套熔断机制：ConfigManager 的冷却状态 + MetricsManager 的熔断状态
+			if resp.KeyMetrics != nil {
+				for idx, km := range resp.KeyMetrics {
+					if idx < len(upstream.APIKeys) {
+						apiKey := upstream.APIKeys[idx]
+						if cfgManager.IsKeyFailed(apiKey) {
+							km.CircuitBroken = true
+						}
+					}
+				}
+			}
+
 			item := gin.H{
 				"channelIndex":        i,
 				"channelName":         upstream.Name,
@@ -810,6 +836,18 @@ func GetGeminiChannelMetrics(metricsManager *metrics.MetricsManager, cfgManager 
 		for i, upstream := range upstreams {
 			// 使用多 URL 聚合方法获取渠道指标（支持 failover 多端点场景）
 			resp := metricsManager.ToResponseMultiURL(i, upstream.GetAllBaseURLs(), upstream.APIKeys, 0)
+
+			// 综合两套熔断机制：ConfigManager 的冷却状态 + MetricsManager 的熔断状态
+			if resp.KeyMetrics != nil {
+				for idx, km := range resp.KeyMetrics {
+					if idx < len(upstream.APIKeys) {
+						apiKey := upstream.APIKeys[idx]
+						if cfgManager.IsKeyFailed(apiKey) {
+							km.CircuitBroken = true
+						}
+					}
+				}
+			}
 
 			item := gin.H{
 				"channelIndex":        i,

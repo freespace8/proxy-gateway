@@ -2,6 +2,7 @@
 package pricing
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -16,11 +17,29 @@ const LiteLLMPricingURL = "https://raw.githubusercontent.com/BerriAI/litellm/mai
 type jsonInt int
 
 func (i *jsonInt) UnmarshalJSON(data []byte) error {
+	data = bytes.TrimSpace(data)
+	if len(data) == 0 || bytes.Equal(data, []byte("null")) {
+		*i = 0
+		return nil
+	}
+
 	// number
 	var n int
 	if err := json.Unmarshal(data, &n); err == nil {
 		*i = jsonInt(n)
 		return nil
+	}
+
+	var num json.Number
+	if err := json.Unmarshal(data, &num); err == nil {
+		if n64, err := num.Int64(); err == nil {
+			*i = jsonInt(int(n64))
+			return nil
+		}
+		if f64, err := num.Float64(); err == nil {
+			*i = jsonInt(int(f64))
+			return nil
+		}
 	}
 
 	// string
@@ -32,17 +51,14 @@ func (i *jsonInt) UnmarshalJSON(data []byte) error {
 		}
 		n64, err := strconv.ParseInt(s, 10, 32)
 		if err != nil {
-			return fmt.Errorf("invalid int string %q: %w", s, err)
+			// LiteLLM 的数据偶尔会在该字段放入说明文字；不要让整表加载失败。
+			*i = 0
+			return nil
 		}
 		*i = jsonInt(int(n64))
 		return nil
 	}
 
-	// null / other
-	if string(data) == "null" {
-		*i = 0
-		return nil
-	}
 	return fmt.Errorf("invalid int json: %s", string(data))
 }
 

@@ -497,8 +497,14 @@ const chartSeries = computed(() => buildChartSeries(historyData.value))
 
 // Helper: format number for display
 const formatNumber = (num: number): string => {
-  if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M'
-  if (num >= 1000) return (num / 1000).toFixed(1) + 'K'
+  const formatWithSuffix = (value: number, suffix: string) => {
+    const fixed = value.toFixed(1)
+    const trimmed = fixed.endsWith('.0') ? fixed.slice(0, -2) : fixed
+    return trimmed + suffix
+  }
+  if (num >= 1000000000) return formatWithSuffix(num / 1000000000, 'B')
+  if (num >= 1000000) return formatWithSuffix(num / 1000000, 'M')
+  if (num >= 1000) return formatWithSuffix(num / 1000, 'K')
   return num.toFixed(0)
 }
 

@@ -195,17 +195,30 @@ function formatDurationMs(durationMs: number) {
 function formatTokens(inputTokens: number, outputTokens: number) {
   const input = Number.isFinite(inputTokens) ? inputTokens : 0
   const output = Number.isFinite(outputTokens) ? outputTokens : 0
-  return `${input} / ${output}`
+  return `${formatCompactNumber(input)} / ${formatCompactNumber(output)}`
 }
 
 function formatCacheTokens(tokens: unknown) {
   const value = typeof tokens === 'number' && Number.isFinite(tokens) ? tokens : 0
-  return value === 0 ? '--' : String(value)
+  return value === 0 ? '--' : formatCompactNumber(value)
 }
 
 function formatCost(costCents: number) {
   if (!Number.isFinite(costCents)) return '--'
   return `$${(costCents / 100).toFixed(2)}`
+}
+
+function formatCompactNumber(num: number): string {
+  const formatWithSuffix = (value: number, suffix: string) => {
+    const fixed = value.toFixed(1)
+    const trimmed = fixed.endsWith('.0') ? fixed.slice(0, -2) : fixed
+    return trimmed + suffix
+  }
+  const abs = Math.abs(num)
+  if (abs >= 1000000000) return formatWithSuffix(num / 1000000000, 'B')
+  if (abs >= 1000000) return formatWithSuffix(num / 1000000, 'M')
+  if (abs >= 1000) return formatWithSuffix(num / 1000, 'K')
+  return Math.round(num).toString()
 }
 
 async function fetchLogs() {

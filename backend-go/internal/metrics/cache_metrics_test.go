@@ -430,8 +430,8 @@ func TestMetricsManager_DBBackedHistoryAndFallback(t *testing.T) {
 		MetricsKey: metricsKey,
 		BaseURL:    baseURL,
 		KeyMask:    keyMask,
-		// 早于 since，确保 partialStart=0，但 dailyTotals 仍有整日数据。
-		Timestamp: sinceDayStart.Add(1 * time.Hour),
+		// 落在起始日且早于 since，确保 partialStart=0，但 dailyTotals 仍有整日数据。
+		Timestamp: sinceDayStart,
 		Success:   true,
 		APIType:   "messages",
 	})

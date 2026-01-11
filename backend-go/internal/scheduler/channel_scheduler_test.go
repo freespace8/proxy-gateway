@@ -103,7 +103,11 @@ func TestPromotedChannelBypassesHealthCheck(t *testing.T) {
 
 	// 模拟促销渠道之前有高失败率（使其不健康）
 	metricsManager := scheduler.messagesMetricsManager
-	for i := 0; i < 10; i++ {
+	minRequests := metricsManager.GetWindowSize() / 2
+	if minRequests < 3 {
+		minRequests = 3
+	}
+	for i := 0; i < minRequests; i++ {
 		metricsManager.RecordFailure("https://promoted.example.com", "sk-promoted-key")
 	}
 
@@ -205,7 +209,11 @@ func TestNonPromotedChannelStillChecksHealth(t *testing.T) {
 
 	// 模拟第一个渠道不健康
 	metricsManager := scheduler.messagesMetricsManager
-	for i := 0; i < 10; i++ {
+	minRequests := metricsManager.GetWindowSize() / 2
+	if minRequests < 3 {
+		minRequests = 3
+	}
+	for i := 0; i < minRequests; i++ {
 		metricsManager.RecordFailure("https://unhealthy.example.com", "sk-unhealthy-key")
 	}
 

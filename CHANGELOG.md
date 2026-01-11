@@ -4,6 +4,57 @@
 
 ---
 
+## [v2.4.30] - 2026-01-10
+
+### 🐛 修复
+
+- **修复流式响应工具调用分裂问题** - 当上游返回的工具调用被意外分成两个 content_block 时自动合并
+  - 问题场景：第一个 block 有 name 和 id 但参数为空 "{}"，第二个 block 没有 name 但有完整参数
+  - 新增 `mergeSplitToolCalls()` 方法检测并合并分裂的工具调用
+  - 在 `GetSynthesizedContent()` 中调用，确保日志输出正确的工具调用信息
+  - 涉及文件：`backend-go/internal/utils/stream_synthesizer.go`
+
+---
+
+## [v2.4.29] - 2026-01-10
+
+### 🐛 修复
+
+- **修复空 signature 字段导致 Claude API 400 错误** - 客户端可能发送带空 `signature` 字段（空字符串或 null）的请求，Claude API 会拒绝并返回 400 错误
+  - 新增 `RemoveEmptySignatures()` 函数，定向移除 `messages[*].content[*].signature` 路径下的空值
+  - 使用 `json.Decoder` 保留数字精度，`SetEscapeHTML(false)` 保持原始格式
+  - **注意**：当请求体被修改时，JSON 字段顺序可能发生变化（不影响 API 语义）
+  - 在 Messages Handler 入口处调用预处理，确保请求发送前清理无效字段
+  - 涉及文件：`backend-go/internal/handlers/common/request.go`、`backend-go/internal/handlers/messages/handler.go`
+
+### ✨ 改进
+
+- **增强 Trace 亲和性日志记录** - 在关键操作点添加详细日志，方便排查亲和性相关问题
+  - `[Affinity-Set]` 记录新建/变更用户亲和
+  - `[Affinity-Remove]` 记录手动移除用户亲和
+  - `[Affinity-RemoveByChannel]` 记录渠道移除时批量清理
+  - `[Affinity-Cleanup]` 记录定时清理过期记录
+  - 日志在锁外执行，避免高负载下的尾延迟
+  - 用户 ID 分级脱敏：短 ID 也保留部分字符便于关联
+  - 涉及文件：`backend-go/internal/session/trace_affinity.go`
+
+## [v2.4.28] - 2026-01-07
+
+### 🐛 修复
+
+- **修复内容审核错误导致无限重试问题** - 当上游返回 `sensitive_words_detected` 等内容审核错误时，单渠道场景下会无限重试
+  - 根因：`classifyByStatusCode(500)` 触发 failover，但未检查 `error.code` 字段中的不可重试错误码
+  - 新增 `isNonRetryableErrorCode()` 函数，检测内容审核和无效请求错误码
+  - 新增 `isNonRetryableError()` 函数，从响应体提取并检测不可重试错误
+  - 在 `shouldRetryWithNextKeyNormal()` 和 `shouldRetryWithNextKeyFuzzy()` 入口处优先检测
+  - 不可重试错误码：`sensitive_words_detected`、`content_policy_violation`、`content_filter`、`content_blocked`、`moderation_blocked`、`invalid_request`、`invalid_request_error`、`bad_request`
+  - 涉及文件：`backend-go/internal/handlers/common/failover.go`
+
+### 🧪 测试
+
+- **新增不可重试错误码测试** - 覆盖 `sensitive_words_detected` 等错误码在 Normal/Fuzzy 模式下的行为
+  - 涉及文件：`backend-go/internal/handlers/common/failover_test.go`
+
 ## [v2.4.27] - 2026-01-05
 
 ### 🐛 修复

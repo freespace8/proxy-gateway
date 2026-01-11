@@ -427,6 +427,9 @@ func (s *StreamSynthesizer) GetSynthesizedContent() string {
 
 	// 添加工具调用信息
 	if len(s.toolCallAccumulator) > 0 {
+		// 修复分裂的工具调用：检测并合并元数据和参数分离的情况
+		s.mergeSplitToolCalls()
+
 		var toolCallsBuilder strings.Builder
 		for index, tool := range s.toolCallAccumulator {
 			args := tool.Arguments
@@ -466,6 +469,50 @@ func (s *StreamSynthesizer) GetSynthesizedContent() string {
 	}
 
 	return result
+}
+
+// mergeSplitToolCalls 修复分裂的工具调用
+// 问题场景：上游返回的工具调用被意外分成两个 content_block：
+// - 第一个 block 有 name 和 id，但参数为空 "{}"
+// - 第二个 block 没有 name（显示为 unknown_function），但有完整参数
+// 此方法检测并合并这种情况
+func (s *StreamSynthesizer) mergeSplitToolCalls() {
+	if len(s.toolCallAccumulator) < 2 {
+		return
+	}
+
+	indices := make([]int, 0, len(s.toolCallAccumulator))
+	for idx := range s.toolCallAccumulator {
+		indices = append(indices, idx)
+	}
+	sort.Ints(indices)
+
+	toDelete := make(map[int]bool)
+	for i := 0; i < len(indices)-1; i++ {
+		currIdx := indices[i]
+		nextIdx := indices[i+1]
+
+		curr := s.toolCallAccumulator[currIdx]
+		next := s.toolCallAccumulator[nextIdx]
+		if curr == nil || next == nil || curr.ID == "" {
+			continue
+		}
+
+		currArgsEmpty := curr.Arguments == "" || curr.Arguments == "{}"
+		nextHasNoName := next.Name == ""
+		nextHasArgs := next.Arguments != "" && next.Arguments != "{}"
+
+		// next.ID 允许为空（常见），若存在则必须与 curr.ID 一致，避免误合并
+		if curr.Name != "" && currArgsEmpty && nextHasNoName && nextHasArgs && (next.ID == "" || next.ID == curr.ID) {
+			curr.Arguments = next.Arguments
+			toDelete[nextIdx] = true
+			i++
+		}
+	}
+
+	for idx := range toDelete {
+		delete(s.toolCallAccumulator, idx)
+	}
 }
 
 // IsParseFailed 检查解析是否失败

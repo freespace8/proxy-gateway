@@ -644,3 +644,27 @@ func TestShouldRetryWithNextKey_FuzzyMode_403WithQuotaMessage(t *testing.T) {
 		})
 	}
 }
+
+func TestShouldRetryWithNextKey_NonRetryableErrorCode(t *testing.T) {
+	tests := []struct {
+		name       string
+		statusCode int
+		code       string
+		fuzzyMode  bool
+	}{
+		{name: "normal sensitive_words_detected", statusCode: 500, code: "sensitive_words_detected", fuzzyMode: false},
+		{name: "fuzzy sensitive_words_detected", statusCode: 500, code: "sensitive_words_detected", fuzzyMode: true},
+		{name: "normal invalid_request", statusCode: 400, code: "invalid_request", fuzzyMode: false},
+		{name: "fuzzy content_policy_violation", statusCode: 403, code: "content_policy_violation", fuzzyMode: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := []byte(`{"error":{"type":"error","code":"` + tt.code + `","message":"blocked"}}`)
+			gotFailover, gotQuota := ShouldRetryWithNextKey(tt.statusCode, body, tt.fuzzyMode)
+			if gotFailover || gotQuota {
+				t.Errorf("ShouldRetryWithNextKey(%d, non_retryable, %v) = (%v, %v), want (false, false)", tt.statusCode, tt.fuzzyMode, gotFailover, gotQuota)
+			}
+		})
+	}
+}

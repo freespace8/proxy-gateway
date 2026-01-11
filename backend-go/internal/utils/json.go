@@ -1,9 +1,27 @@
 package utils
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 )
+
+// MarshalJSONNoEscape 序列化 JSON 并禁用 HTML 字符转义
+// 使用 json.Encoder + SetEscapeHTML(false) 避免将 <, >, & 等字符转义为 \u003c 等
+// 返回去除末尾换行符的字节数组
+func MarshalJSONNoEscape(v interface{}) ([]byte, error) {
+	var buf bytes.Buffer
+	encoder := json.NewEncoder(&buf)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(v); err != nil {
+		return nil, err
+	}
+	b := buf.Bytes()
+	if len(b) > 0 && b[len(b)-1] == '\n' {
+		b = b[:len(b)-1]
+	}
+	return b, nil
+}
 
 // TruncateJSONIntelligently 智能截断JSON中的长文本内容,保持结构完整
 // 只截断字符串值,不影响JSON结构

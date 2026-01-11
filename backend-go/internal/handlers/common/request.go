@@ -17,6 +17,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+var signatureFieldKey = []byte(`"signature"`)
+
 // ReadRequestBody 读取并验证请求体大小
 // 返回: (bodyBytes, error)
 // 如果请求体过大，会自动返回 413 错误并排空剩余数据
@@ -153,6 +155,90 @@ func AreAllKeysSuspended(metricsManager *metrics.MetricsManager, baseURL string,
 		}
 	}
 	return true
+}
+
+// RemoveEmptySignatures 移除请求体中 messages[*].content[*].signature 的空值
+// 用于预防 Claude API 返回 400 错误
+// 仅处理已知路径：messages 数组中各消息的 content 数组中的 signature 字段
+// enableLog: 是否输出日志（由 envCfg.EnableRequestLogs 控制）
+func RemoveEmptySignatures(bodyBytes []byte, enableLog bool) ([]byte, bool) {
+	if len(bodyBytes) == 0 || !bytes.Contains(bodyBytes, signatureFieldKey) {
+		return bodyBytes, false
+	}
+
+	decoder := json.NewDecoder(bytes.NewReader(bodyBytes))
+	decoder.UseNumber()
+
+	var data map[string]interface{}
+	if err := decoder.Decode(&data); err != nil {
+		return bodyBytes, false
+	}
+
+	modified, removedCount := removeEmptySignaturesInMessages(data)
+	if !modified {
+		return bodyBytes, false
+	}
+
+	if enableLog && removedCount > 0 {
+		log.Printf("[Preprocess] 已移除 %d 个空 signature 字段", removedCount)
+	}
+
+	newBytes, err := utils.MarshalJSONNoEscape(data)
+	if err != nil {
+		return bodyBytes, false
+	}
+	return newBytes, true
+}
+
+// removeEmptySignaturesInMessages 仅处理 messages[*].content[*].signature 路径
+// 返回 (是否有修改, 移除的字段数)
+func removeEmptySignaturesInMessages(data map[string]interface{}) (bool, int) {
+	messages, ok := data["messages"].([]interface{})
+	if !ok {
+		return false, 0
+	}
+
+	modified := false
+	removedCount := 0
+
+	for _, msg := range messages {
+		msgMap, ok := msg.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		content, ok := msgMap["content"].([]interface{})
+		if !ok {
+			continue
+		}
+
+		for _, block := range content {
+			blockMap, ok := block.(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			sig, exists := blockMap["signature"]
+			if !exists {
+				continue
+			}
+
+			if sig == nil {
+				delete(blockMap, "signature")
+				modified = true
+				removedCount++
+				continue
+			}
+
+			if str, ok := sig.(string); ok && str == "" {
+				delete(blockMap, "signature")
+				modified = true
+				removedCount++
+			}
+		}
+	}
+
+	return modified, removedCount
 }
 
 // ExtractUserID 从请求体中提取 user_id（用于 Messages API）

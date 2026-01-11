@@ -209,6 +209,13 @@ func (h *Handler) Handle(c *gin.Context) {
 		return
 	}
 
+	// 预处理：移除空 signature 字段，预防 Claude API 400
+	// 若请求体被修改，后续重试/转发必须使用新 body
+	if newBody, modified := common.RemoveEmptySignatures(bodyBytes, envCfg.EnableRequestLogs); modified {
+		bodyBytes = newBody
+		common.RestoreRequestBody(c, bodyBytes)
+	}
+
 	// 解析请求
 	var claudeReq types.ClaudeRequest
 	if len(bodyBytes) > 0 {

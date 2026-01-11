@@ -196,3 +196,57 @@ func TestExtractUserIDAndConversationID(t *testing.T) {
 		t.Fatalf("metadata.user_id = %q", got)
 	}
 }
+
+func TestRemoveEmptySignatures(t *testing.T) {
+	tests := []struct {
+		name         string
+		body         string
+		wantModified bool
+		wantRemoved  bool
+	}{
+		{
+			name:         "no signature",
+			body:         `{"messages":[{"content":[{"type":"text","text":"hi"}]}]}`,
+			wantModified: false,
+			wantRemoved:  false,
+		},
+		{
+			name:         "empty string signature removed",
+			body:         `{"messages":[{"content":[{"type":"tool_use","signature":"","text":"x"}]}]}`,
+			wantModified: true,
+			wantRemoved:  true,
+		},
+		{
+			name:         "null signature removed",
+			body:         `{"messages":[{"content":[{"type":"tool_use","signature":null,"text":"x"}]}]}`,
+			wantModified: true,
+			wantRemoved:  true,
+		},
+		{
+			name:         "non-empty signature kept",
+			body:         `{"messages":[{"content":[{"type":"tool_use","signature":"abc","text":"x"}]}]}`,
+			wantModified: false,
+			wantRemoved:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out, modified := RemoveEmptySignatures([]byte(tt.body), false)
+			if modified != tt.wantModified {
+				t.Fatalf("modified=%v, want %v, out=%s", modified, tt.wantModified, string(out))
+			}
+
+			if tt.wantRemoved {
+				if bytes.Contains(out, []byte(`"signature"`)) {
+					t.Fatalf("signature should be removed, out=%s", string(out))
+				}
+				return
+			}
+
+			if !bytes.Equal(out, []byte(tt.body)) {
+				t.Fatalf("body should be unchanged, out=%s", string(out))
+			}
+		})
+	}
+}

@@ -74,7 +74,7 @@ func NewEnvConfig() *EnvConfig {
 		MetricsPersistenceEnabled: getEnv("METRICS_PERSISTENCE_ENABLED", "true") != "false",
 		MetricsRetentionDays:      clampInt(getEnvAsInt("METRICS_RETENTION_DAYS", 7), 3, 30),
 		// HTTP 客户端配置
-		ResponseHeaderTimeout: clampInt(getEnvAsInt("RESPONSE_HEADER_TIMEOUT", 60), 30, 120), // 30-120 秒
+		ResponseHeaderTimeout: clampInt(getEnvAsInt("RESPONSE_HEADER_TIMEOUT", 300), 30, 600), // 30-600 秒
 		// 日志文件配置
 		LogDir:        getEnv("LOG_DIR", "logs"),
 		LogFile:       getEnv("LOG_FILE", "app.log"),

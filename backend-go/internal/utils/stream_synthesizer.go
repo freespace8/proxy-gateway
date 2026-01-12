@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -430,8 +431,16 @@ func (s *StreamSynthesizer) GetSynthesizedContent() string {
 		// 修复分裂的工具调用：检测并合并元数据和参数分离的情况
 		s.mergeSplitToolCalls()
 
+		// 按 index 排序输出，避免 map 遍历顺序不稳定
+		indices := make([]int, 0, len(s.toolCallAccumulator))
+		for idx := range s.toolCallAccumulator {
+			indices = append(indices, idx)
+		}
+		sort.Ints(indices)
+
 		var toolCallsBuilder strings.Builder
-		for index, tool := range s.toolCallAccumulator {
+		for _, index := range indices {
+			tool := s.toolCallAccumulator[index]
 			args := tool.Arguments
 			if args == "" {
 				args = "{}"
@@ -444,7 +453,7 @@ func (s *StreamSynthesizer) GetSynthesizedContent() string {
 
 			id := tool.ID
 			if id == "" {
-				id = "tool_" + string(rune(index))
+				id = "tool_" + strconv.Itoa(index)
 			}
 
 			toolCallsBuilder.WriteString("\nTool Call: ")
@@ -481,30 +490,41 @@ func (s *StreamSynthesizer) mergeSplitToolCalls() {
 		return
 	}
 
+	// 收集所有索引并排序
 	indices := make([]int, 0, len(s.toolCallAccumulator))
 	for idx := range s.toolCallAccumulator {
 		indices = append(indices, idx)
 	}
 	sort.Ints(indices)
 
+	// 检测分裂模式：有 name 但参数为空/"{}" 的 block，后面紧跟无 name 但有参数的 block
 	toDelete := make(map[int]bool)
 	for i := 0; i < len(indices)-1; i++ {
 		currIdx := indices[i]
 		nextIdx := indices[i+1]
 
+		// 约束：只合并连续的 index（防止误合并不相关的调用）
+		if nextIdx != currIdx+1 {
+			continue
+		}
+
 		curr := s.toolCallAccumulator[currIdx]
 		next := s.toolCallAccumulator[nextIdx]
-		if curr == nil || next == nil || curr.ID == "" {
+		if curr == nil || next == nil {
 			continue
 		}
 
 		currArgsEmpty := curr.Arguments == "" || curr.Arguments == "{}"
 		nextHasNoName := next.Name == ""
 		nextHasArgs := next.Arguments != "" && next.Arguments != "{}"
+		idMatch := next.ID == "" || curr.ID == "" || next.ID == curr.ID
 
 		// next.ID 允许为空（常见），若存在则必须与 curr.ID 一致，避免误合并
-		if curr.Name != "" && currArgsEmpty && nextHasNoName && nextHasArgs && (next.ID == "" || next.ID == curr.ID) {
+		if curr.Name != "" && currArgsEmpty && nextHasNoName && nextHasArgs && idMatch {
 			curr.Arguments = next.Arguments
+			if curr.ID == "" && next.ID != "" {
+				curr.ID = next.ID
+			}
 			toDelete[nextIdx] = true
 			i++
 		}

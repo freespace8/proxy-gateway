@@ -25,7 +25,7 @@ if (import.meta.env.DEV) {
 }
 
 // 渠道状态枚举
-export type ChannelStatus = 'active' | 'suspended' | 'disabled'
+export type ChannelStatus = 'active' | 'suspended' | 'disabled' | ''
 
 // 渠道指标
 // 分时段统计
@@ -780,7 +780,7 @@ class ApiService {
   }
 
   // 获取 Gemini 全局统计历史
-  async getGeminiGlobalStats(duration: '1h' | '6h' | '24h' | 'today' = '24h'): Promise<GlobalStatsHistoryResponse> {
+  async getGeminiGlobalStats(duration: '1h' | '6h' | '24h' | 'today' | '7d' | '30d' = '24h'): Promise<GlobalStatsHistoryResponse> {
     return this.request(`/gemini/global/stats/history?duration=${duration}`)
   }
 

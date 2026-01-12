@@ -116,7 +116,7 @@
         <div class="status-indicator">
           <v-tooltip :text="getStatusTooltip()" location="bottom" :open-delay="150">
             <template #activator="{ props }">
-              <div class="status-badge cursor-help" v-bind="props" :class="`status-${channel.status || 'unknown'}`">
+              <div class="status-badge cursor-help" v-bind="props" :class="`status-${channel.health || 'unknown'}`">
                 <v-icon 
                   :color="getStatusColor()"
                   size="16"
@@ -318,7 +318,7 @@ const getStatusColor = () => {
     'error': 'error',
     'unknown': 'warning'
   }
-  return colorMap[props.channel.status || 'unknown']
+  return colorMap[props.channel.health || 'unknown']
 }
 
 // 获取状态图标
@@ -328,7 +328,7 @@ const getStatusIcon = () => {
     'error': 'mdi-alert-circle',
     'unknown': 'mdi-help-circle'
   }
-  return iconMap[props.channel.status || 'unknown']
+  return iconMap[props.channel.health || 'unknown']
 }
 
 // 获取状态文本
@@ -338,12 +338,12 @@ const getStatusText = () => {
     'error': '错误',
     'unknown': '未检测'
   }
-  return textMap[props.channel.status || 'unknown']
+  return textMap[props.channel.health || 'unknown']
 }
 
 // 状态解释文案（悬浮提示）
 const getStatusTooltip = () => {
-  const status = props.channel.status || 'unknown'
+  const status = props.channel.health || 'unknown'
   if (status === 'healthy') return '连接正常：最近一次检测通过'
   if (status === 'error') return '连接异常：请检查基础 URL、网络或 API 密钥'
   return '尚未检测：请点击“测试延迟”进行检测'

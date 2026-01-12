@@ -74,6 +74,7 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useTheme } from 'vuetify'
 import VueApexCharts from 'vue3-apexcharts'
+import type { ApexOptions } from 'apexcharts'
 import { api, type ChannelKeyMetricsHistoryResponse } from '../services/api'
 
 // Register apexchart component
@@ -313,7 +314,7 @@ const allDataPoints = computed(() => {
 })
 
 // Computed: chart options
-const chartOptions = computed(() => {
+const chartOptions = computed<ApexOptions>(() => {
   const mode = selectedView.value
 
   // Token/Cache 模式使用双 Y 轴（左侧 Input/Read，右侧 Output/Create）
@@ -379,7 +380,7 @@ const chartOptions = computed(() => {
     },
     colors: getChartColors(),
     fill: {
-      type: 'gradient',
+      type: 'gradient' as const,
       gradient: {
         shadeIntensity: 1,
         opacityFrom: 0.4,
@@ -391,7 +392,7 @@ const chartOptions = computed(() => {
       enabled: false
     },
     stroke: {
-      curve: 'smooth',
+      curve: 'smooth' as const,
       width: 2,
       // traffic 模式全用实线；tokens/cache 模式：Input/Read 实线，Output/Write 虚线
       dashArray: getDashArray()
@@ -734,7 +735,7 @@ const refreshData = async (isAutoRefresh = false) => {
       // Update data in place and use updateSeries for smooth update
       historyData.value = newData
       const newSeries = buildChartSeries(newData)
-      chartRef.value.updateSeries(newSeries, false) // false = no animation reset
+      chartRef.value?.updateSeries(newSeries, false) // false = no animation reset
     } else {
       // Full update (initial load or structure changed)
       historyData.value = newData

@@ -21,7 +21,7 @@ type errReadCloser struct{}
 func (errReadCloser) Read([]byte) (int, error) { return 0, io.ErrUnexpectedEOF }
 func (errReadCloser) Close() error             { return nil }
 
-func TestGeminiHandler_BypassAuthWithXGoogAPIKey(t *testing.T) {
+func TestGeminiHandler_RequiresProxyAuthEvenIfXGoogAPIKeyProvided(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -58,11 +58,11 @@ func TestGeminiHandler_BypassAuthWithXGoogAPIKey(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-pro:generateContent", bytes.NewBufferString(`{"contents":[{"role":"user","parts":[{"text":"hi"}]}]}`))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-goog-api-key", "client-key") // 触发 bypass
+	req.Header.Set("x-goog-api-key", "client-key")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
-	if w.Code != http.StatusOK {
+	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 	}
 }
@@ -93,7 +93,7 @@ func TestGeminiHandler_InvalidJSONReturns400(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-pro:generateContent", bytes.NewBufferString("{"))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-goog-api-key", "client-key")
+	req.Header.Set("x-api-key", "secret")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
@@ -128,7 +128,7 @@ func TestGeminiHandler_MissingModelInURLReturns400(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/v1beta/models/", bytes.NewBufferString(`{"contents":[]}`))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-goog-api-key", "client-key")
+	req.Header.Set("x-api-key", "secret")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 

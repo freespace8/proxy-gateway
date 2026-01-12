@@ -4,6 +4,42 @@
 
 ---
 
+## [v2.4.31] - 2026-01-12
+
+### 🐛 修复
+
+- **修复流式工具调用 ID 生成错误并增强合并逻辑**
+  - `string(rune(index))` 改为 `strconv.Itoa(index)`，避免 index>9 时生成不可读 ID
+  - 工具调用输出按 index 排序，确保日志顺序稳定
+  - 合并逻辑增强：仅合并连续 index，新增 ID 匹配检查和补全
+  - 涉及文件：`backend-go/internal/utils/stream_synthesizer.go`
+
+- **上游请求绑定 Context，支持取消**
+  - providers 创建请求改用 `http.NewRequestWithContext(c.Request.Context(), ...)`
+  - 涉及文件：`backend-go/internal/providers/{claude,openai,gemini,responses}.go`
+
+- **为 HTTP Server 增加 ReadHeaderTimeout/IdleTimeout**
+  - 提升慢请求头/长连接场景的资源保护
+  - 涉及文件：`backend-go/main.go`
+
+- **修复 Gemini 鉴权旁路并收紧 WebAuth**
+  - Gemini 代理端点统一走代理访问密钥鉴权（`x-api-key` / `Authorization: Bearer`）
+  - WebAuth 放行规则补齐 `/v1beta/` 代理路径
+  - 涉及文件：`backend-go/internal/handlers/gemini/handler.go`、`backend-go/internal/middleware/auth.go`
+
+### 🛠️ 前端
+
+- **修复 ApexCharts 类型检查与空值调用**
+  - 涉及文件：`frontend/src/components/*Chart.vue`、`frontend/src/services/api.ts`
+
+- **修复渠道状态展示与类型检查**
+  - 状态展示统一使用 `health`（探测结果）作为 UI 徽标来源
+  - `channel.status=""` 时兜底为 `active`，避免展示/样式拿到空值
+  - 类型检查排除 `src/components/__tests__`（当前环境缺少 Node types）
+  - 涉及文件：`frontend/src/components/ChannelCard.vue`、`frontend/src/components/ChannelOrchestration.vue`、`frontend/tsconfig.json`
+
+---
+
 ## [v2.4.30] - 2026-01-10
 
 ### 🐛 修复

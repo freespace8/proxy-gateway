@@ -210,10 +210,15 @@ func TestResponsesHandler_MultiChannel_BaseURLFailoverWithinChannel(t *testing.T
 	r := gin.New()
 	r.POST("/v1/responses", NewHandler(envCfg, cfgManager, sessionManager, sch, nil, nil, nil, nil))
 
-	reqBody := `{"model":"gpt-4o","input":"hello"}`
+	// 固定路由 key，确保选择到 r0 槽位并覆盖“同渠道多 BaseURL failover”路径
+	routingKey := "conv_baseurl_failover"
+	sch.SetTraceAffinitySlot(routingKey, 0, 0)
+
+	reqBody := `{"model":"gpt-4o","input":"hello","store":false}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewBufferString(reqBody))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-api-key", envCfg.ProxyAccessKey)
+	req.Header.Set("Conversation_id", routingKey)
 	w := httptest.NewRecorder()
 
 	r.ServeHTTP(w, req)
@@ -231,4 +236,3 @@ func TestResponsesHandler_MultiChannel_BaseURLFailoverWithinChannel(t *testing.T
 		t.Fatalf("unexpected body: %s", w.Body.String())
 	}
 }
-

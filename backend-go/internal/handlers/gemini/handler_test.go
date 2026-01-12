@@ -61,22 +61,6 @@ func createTestScheduler(t *testing.T, cfgManager *config.ConfigManager) (*sched
 	}
 }
 
-func TestExtractGeminiAPIKey(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	c, _ := gin.CreateTestContext(httptest.NewRecorder())
-
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1beta/models/x:generateContent?key=q", nil)
-	if got := extractGeminiAPIKey(c); got != "q" {
-		t.Fatalf("got %q", got)
-	}
-
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1beta/models/x:generateContent", nil)
-	c.Request.Header.Set("x-goog-api-key", "h")
-	if got := extractGeminiAPIKey(c); got != "h" {
-		t.Fatalf("got %q", got)
-	}
-}
-
 func TestExtractModelName(t *testing.T) {
 	if got := extractModelName("gemini-pro:generateContent"); got != "gemini-pro" {
 		t.Fatalf("got %q", got)

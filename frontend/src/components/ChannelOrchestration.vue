@@ -541,10 +541,11 @@ let latencyCheckTimer: ReturnType<typeof setInterval> | null = null
 	  statsExpandedChannelIndex.value = statsExpandedChannelIndex.value === channelIndex ? null : channelIndex
 	}
 
-	const getChannelDisplayStatus = (channel: Channel): ChannelStatus | 'healthy' | 'error' | 'unknown' => {
-	  if (channel.status === 'disabled' || channel.status === 'suspended') return channel.status
-	  return channel.health ?? channel.status ?? 'active'
-	}
+		const getChannelDisplayStatus = (channel: Channel): ChannelStatus | 'healthy' | 'error' | 'unknown' => {
+		  if (channel.status === 'disabled' || channel.status === 'suspended') return channel.status
+		  const baseStatus: ChannelStatus = channel.status || 'active'
+		  return channel.health ?? baseStatus
+		}
 
 // 活跃渠道（可拖拽排序）- 包含 active 和 suspended 状态
 const activeChannels = ref<Channel[]>([])

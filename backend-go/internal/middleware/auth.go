@@ -16,8 +16,7 @@ func WebAuthMiddleware(envCfg *config.EnvConfig, cfgManager *config.ConfigManage
 		path := c.Request.URL.Path
 
 		// 公开端点直接放行（健康检查固定为 /health）
-		if path == "/health" ||
-			(envCfg.IsDevelopment() && path == "/admin/dev/info") {
+		if path == "/health" {
 			c.Next()
 			return
 		}
@@ -29,7 +28,7 @@ func WebAuthMiddleware(envCfg *config.EnvConfig, cfgManager *config.ConfigManage
 		}
 
 		// API 代理端点后续处理
-		if strings.HasPrefix(path, "/v1/") {
+		if strings.HasPrefix(path, "/v1/") || strings.HasPrefix(path, "/v1beta/") {
 			c.Next()
 			return
 		}
@@ -77,9 +76,8 @@ func WebAuthMiddleware(envCfg *config.EnvConfig, cfgManager *config.ConfigManage
 			}
 
 			// 认证成功 - 记录日志(可选，根据日志级别)
-			// 永久静默高频轮询端点；且在 QuietPollingLogs 开启时额外静默其它轮询端点
-			shouldSilent := isAlwaysSilentEndpoint(path) || (envCfg.QuietPollingLogs && isPollingEndpoint(path))
-			if envCfg.ShouldLog("info") && !shouldSilent {
+			// 如果启用了 QuietPollingLogs，则静默轮询端点日志
+			if envCfg.ShouldLog("info") && !(envCfg.QuietPollingLogs && isPollingEndpoint(path)) {
 				log.Printf("[Auth-Success] IP: %s | Path: %s | Time: %s", clientIP, path, timestamp)
 			}
 		}
@@ -98,23 +96,8 @@ func isPollingEndpoint(path string) bool {
 	// 移除尾部斜杠
 	path = strings.TrimSuffix(path, "/")
 
-	// 复用 logger.go 中的 alwaysSkipPrefixes + defaultSkipPrefixes
+	// 复用 logger.go 中的 defaultSkipPrefixes
 	for _, prefix := range defaultSkipPrefixes {
-		if strings.HasPrefix(path, prefix) {
-			return true
-		}
-	}
-	return false
-}
-
-// isAlwaysSilentEndpoint 判断是否为永久静默端点（前缀匹配，兼容 query string 和尾部斜杠）
-func isAlwaysSilentEndpoint(path string) bool {
-	if idx := strings.Index(path, "?"); idx != -1 {
-		path = path[:idx]
-	}
-	path = strings.TrimSuffix(path, "/")
-
-	for _, prefix := range alwaysSkipPrefixes {
 		if strings.HasPrefix(path, prefix) {
 			return true
 		}

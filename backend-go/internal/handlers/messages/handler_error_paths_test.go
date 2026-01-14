@@ -57,7 +57,7 @@ func TestMessagesHandler_SingleChannel_AllKeysFail_ReturnsLastFailoverError(t *t
 	}
 
 	r := gin.New()
-	r.POST("/v1/messages", NewHandler(envCfg, cfgManager, sch, nil, nil, nil, nil))
+	r.POST("/v1/messages", NewHandler(envCfg, cfgManager, sch, nil, nil, nil, nil, nil))
 
 	reqBody := `{"model":"claude-3","messages":[{"role":"user","content":"hi"}],"max_tokens":16}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewBufferString(reqBody))
@@ -114,7 +114,7 @@ func TestMessagesHandler_SingleChannel_NonFailover400_LogsResponseDetails(t *tes
 	}
 
 	r := gin.New()
-	r.POST("/v1/messages", NewHandler(envCfg, cfgManager, sch, nil, nil, nil, nil))
+	r.POST("/v1/messages", NewHandler(envCfg, cfgManager, sch, nil, nil, nil, nil, nil))
 
 	reqBody := `{"model":"claude-3","messages":[{"role":"user","content":"hi"}],"max_tokens":16}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewBufferString(reqBody))
@@ -171,7 +171,7 @@ func TestMessagesHandler_MultiChannel_AllChannelsFail_ReturnsLastError(t *testin
 	}
 
 	r := gin.New()
-	r.POST("/v1/messages", NewHandler(envCfg, cfgManager, sch, nil, nil, nil, nil))
+	r.POST("/v1/messages", NewHandler(envCfg, cfgManager, sch, nil, nil, nil, nil, nil))
 
 	reqBody := `{"model":"claude-3","messages":[{"role":"user","content":"hi"}],"max_tokens":16}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewBufferString(reqBody))
@@ -191,4 +191,3 @@ func TestMessagesHandler_MultiChannel_AllChannelsFail_ReturnsLastError(t *testin
 		t.Fatalf("unexpected body=%s", w.Body.String())
 	}
 }
-

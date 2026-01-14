@@ -83,6 +83,7 @@ type Handler struct {
 
 	liveRequestManager *monitor.LiveRequestManager
 	sqliteStore        *metrics.SQLiteStore
+	requestLogStore    metrics.RequestLogStore
 }
 
 func NewHandler(
@@ -94,6 +95,7 @@ func NewHandler(
 	billingHandler *billing.Handler,
 	liveRequestManager *monitor.LiveRequestManager,
 	sqliteStore *metrics.SQLiteStore,
+	requestLogStore metrics.RequestLogStore,
 ) gin.HandlerFunc {
 	h := &Handler{
 		envCfg:             envCfg,
@@ -104,6 +106,7 @@ func NewHandler(
 		billingHandler:     billingHandler,
 		liveRequestManager: liveRequestManager,
 		sqliteStore:        sqliteStore,
+		requestLogStore:    requestLogStore,
 	}
 	return h.Handle
 }
@@ -144,7 +147,7 @@ func (h *Handler) Handle(c *gin.Context) {
 	}
 
 	defer func() {
-		if h.sqliteStore == nil {
+		if h.requestLogStore == nil {
 			return
 		}
 
@@ -164,7 +167,7 @@ func (h *Handler) Handle(c *gin.Context) {
 			errorMsg = fmt.Sprintf("http status %d", statusCode)
 		}
 
-		if err := h.sqliteStore.AddRequestLog(metrics.RequestLogRecord{
+		if err := h.requestLogStore.AddRequestLog(metrics.RequestLogRecord{
 			RequestID:           requestID,
 			ChannelIndex:        reqCtx.channelIndex,
 			ChannelName:         reqCtx.channelName,
@@ -281,6 +284,11 @@ func handleMultiChannel(
 	maxSlotAttempts := channelScheduler.GetActiveSlotCount(true) // true = isResponses
 
 	for slotAttempt := 0; slotAttempt < maxSlotAttempts; slotAttempt++ {
+		// 请求方已取消，停止重试（不计失败）
+		if c.Request.Context().Err() != nil {
+			return
+		}
+
 		selection, err := channelScheduler.SelectSlot(c.Request.Context(), routingKey, failedSlots, true)
 		if err != nil {
 			lastError = err
@@ -311,6 +319,10 @@ func handleMultiChannel(
 		success, successKey, successBaseURLIdx, failoverErr, usage := tryChannelWithAllKeys(c, envCfg, cfgManager, channelScheduler, sqliteStore, sessionManager, upstreamOneKey, channelIndex, bodyBytes, responsesReq, startTime, billingHandler, billingCtx, reqCtx)
 
 		if success {
+			// successKey 为空表示请求方取消导致的提前退出：不记录成功/亲和，也不再继续。
+			if successKey == "" {
+				return
+			}
 			if successKey != "" {
 				mappedModel := config.RedirectModel(responsesReq.Model, upstreamOneKey)
 				var costCents int64
@@ -398,12 +410,22 @@ func tryChannelWithAllKeys(
 
 	// 纯 failover：按预热排序遍历所有 BaseURL，每个 BaseURL 尝试所有 Key
 	for sortedIdx, urlResult := range sortedURLResults {
+		// 请求方已取消，停止重试（不计失败）
+		if c.Request.Context().Err() != nil {
+			return true, "", 0, nil, nil
+		}
+
 		currentBaseURL := urlResult.URL
 		originalIdx := urlResult.OriginalIdx // 原始索引用于指标记录
 		failedKeys := make(map[string]bool)  // 每个 BaseURL 重置失败 Key 列表
 		maxRetries := len(upstream.APIKeys)
 
 		for attempt := 0; attempt < maxRetries; attempt++ {
+			// 请求方已取消，停止重试（不计失败）
+			if c.Request.Context().Err() != nil {
+				return true, "", 0, nil, nil
+			}
+
 			common.RestoreRequestBody(c, bodyBytes)
 
 			// 按优先级顺序选择下一个可用 Key
@@ -457,6 +479,10 @@ func tryChannelWithAllKeys(
 
 			resp, err := common.SendRequest(providerReq, upstream, envCfg, responsesReq.Stream)
 			if err != nil {
+				// 请求方取消：视为正常，不计失败，不做降级，不继续 failover
+				if common.IsClientCanceled(err) || c.Request.Context().Err() != nil {
+					return true, "", 0, nil, nil
+				}
 				failedKeys[apiKey] = true
 				cfgManager.MarkKeyAsFailed(apiKey)
 				common.RecordFailureAndStoreLastFailureLog(sqliteStore, metricsManager, "responses", currentBaseURL, apiKey, 0, nil, err, func() {
@@ -609,10 +635,20 @@ func handleSingleChannel(
 
 	// 纯 failover：遍历所有 BaseURL，每个 BaseURL 尝试所有 Key
 	for baseURLIdx, currentBaseURL := range baseURLs {
+		// 请求方已取消，停止重试（不计失败）
+		if c.Request.Context().Err() != nil {
+			return
+		}
+
 		failedKeys := make(map[string]bool) // 每个 BaseURL 重置失败 Key 列表
 		maxRetries := len(upstream.APIKeys)
 
 		for attempt := 0; attempt < maxRetries; attempt++ {
+			// 请求方已取消，停止重试（不计失败）
+			if c.Request.Context().Err() != nil {
+				return
+			}
+
 			common.RestoreRequestBody(c, bodyBytes)
 
 			apiKey, err := cfgManager.GetNextResponsesAPIKey(upstream, failedKeys)
@@ -662,6 +698,10 @@ func handleSingleChannel(
 
 			resp, err := common.SendRequest(providerReq, upstream, envCfg, responsesReq.Stream)
 			if err != nil {
+				// 请求方取消：视为正常，不计失败，不继续 failover
+				if common.IsClientCanceled(err) || c.Request.Context().Err() != nil {
+					return
+				}
 				lastError = err
 				failedKeys[apiKey] = true
 				cfgManager.MarkKeyAsFailed(apiKey)

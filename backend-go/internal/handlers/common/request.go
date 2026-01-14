@@ -3,7 +3,9 @@ package common
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -73,6 +75,12 @@ func SendRequest(req *http.Request, upstream *config.UpstreamConfig, envCfg *con
 	}
 
 	return client.Do(req)
+}
+
+// IsClientCanceled 判断错误是否由请求方取消导致（例如客户端断开/取消请求）。
+// 约定：该类取消视为正常，不应计入失败率/熔断。
+func IsClientCanceled(err error) bool {
+	return err != nil && errors.Is(err, context.Canceled)
 }
 
 // logRequestDetails 记录请求详情（仅开发模式）

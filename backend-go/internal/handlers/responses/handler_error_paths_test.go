@@ -61,7 +61,7 @@ func TestResponsesHandler_SingleChannel_AllKeysFail_ReturnsLastFailoverError(t *
 	}
 
 	r := gin.New()
-	r.POST("/v1/responses", NewHandler(envCfg, cfgManager, sessionManager, sch, nil, nil, nil, nil))
+	r.POST("/v1/responses", NewHandler(envCfg, cfgManager, sessionManager, sch, nil, nil, nil, nil, nil))
 
 	reqBody := `{"model":"gpt-4o","input":"hello"}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewBufferString(reqBody))
@@ -120,7 +120,7 @@ func TestResponsesHandler_SingleChannel_NonFailover400_LogsResponseDetails(t *te
 	}
 
 	r := gin.New()
-	r.POST("/v1/responses", NewHandler(envCfg, cfgManager, sessionManager, sch, nil, nil, nil, nil))
+	r.POST("/v1/responses", NewHandler(envCfg, cfgManager, sessionManager, sch, nil, nil, nil, nil, nil))
 
 	reqBody := `{"model":"gpt-4o","input":"hello"}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewBufferString(reqBody))
@@ -179,7 +179,7 @@ func TestResponsesHandler_MultiChannel_AllChannelsFail_ReturnsLastError(t *testi
 	}
 
 	r := gin.New()
-	r.POST("/v1/responses", NewHandler(envCfg, cfgManager, sessionManager, sch, nil, nil, nil, nil))
+	r.POST("/v1/responses", NewHandler(envCfg, cfgManager, sessionManager, sch, nil, nil, nil, nil, nil))
 
 	reqBody := `{"model":"gpt-4o","input":"hello"}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewBufferString(reqBody))
@@ -199,4 +199,3 @@ func TestResponsesHandler_MultiChannel_AllChannelsFail_ReturnsLastError(t *testi
 		t.Fatalf("unexpected body=%s", w.Body.String())
 	}
 }
-

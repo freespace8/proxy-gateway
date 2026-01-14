@@ -130,7 +130,7 @@ func TestGeminiHandler_SingleChannel_Success(t *testing.T) {
 		MaxRequestBodySize: 1024 * 1024,
 	}
 
-	h := NewHandler(envCfg, cfgManager, sch, nil, nil)
+	h := NewHandler(envCfg, cfgManager, sch, nil, nil, nil)
 	r := gin.New()
 	r.POST("/v1beta/models/*modelAction", h)
 
@@ -216,7 +216,7 @@ func TestGeminiHandler_MultiChannel_FailoverToNextChannel(t *testing.T) {
 		MaxRequestBodySize: 1024 * 1024,
 	}
 
-	h := NewHandler(envCfg, cfgManager, sch, nil, nil)
+	h := NewHandler(envCfg, cfgManager, sch, nil, nil, nil)
 	r := gin.New()
 	r.POST("/v1beta/models/*modelAction", h)
 
@@ -283,7 +283,7 @@ func TestGeminiHandler_Stream_Success(t *testing.T) {
 		EnableResponseLogs: true,
 	}
 
-	h := NewHandler(envCfg, cfgManager, sch, nil, nil)
+	h := NewHandler(envCfg, cfgManager, sch, nil, nil, nil)
 	r := gin.New()
 	r.POST("/v1beta/models/*modelAction", h)
 

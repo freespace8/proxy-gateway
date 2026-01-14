@@ -142,6 +142,17 @@ func main() {
 	// 实时请求监控
 	liveRequestManager := monitor.NewLiveRequestManager(50)
 
+	// 请求日志存储：默认使用 SQLite；可配置为仅内存（最近 N 条）
+	var requestLogStore metrics.RequestLogStore
+	if envCfg.RequestLogsInMemoryOnly {
+		requestLogStore = metrics.NewMemoryRequestLogStore(envCfg.RequestLogsMemoryMaxSize)
+	} else {
+		requestLogStore = metricsStore
+		if requestLogStore == nil {
+			requestLogStore = metrics.NewMemoryRequestLogStore(envCfg.RequestLogsMemoryMaxSize)
+		}
+	}
+
 	// 初始化计费相关组件
 	var billingClient *billing.Client
 	var usageStore *usage.Store
@@ -276,7 +287,7 @@ func main() {
 		apiGroup.PUT("/settings/fuzzy-mode", handlers.SetFuzzyMode(cfgManager))
 
 		// 请求日志 API
-		requestLogsHandler := handlers.NewRequestLogsHandler(metricsStore)
+		requestLogsHandler := handlers.NewRequestLogsHandler(requestLogStore)
 		messagesAPI.GET("/logs", requestLogsHandler.GetLogs)
 		responsesAPI.GET("/logs", requestLogsHandler.GetLogs)
 		geminiAPI.GET("/logs", requestLogsHandler.GetLogs)
@@ -303,7 +314,7 @@ func main() {
 	}
 
 	// 代理端点 - Messages API
-	messagesHandler := messages.NewHandler(envCfg, cfgManager, channelScheduler, billingClient, billingHandler, liveRequestManager, metricsStore)
+	messagesHandler := messages.NewHandler(envCfg, cfgManager, channelScheduler, billingClient, billingHandler, liveRequestManager, metricsStore, requestLogStore)
 	r.POST("/v1/messages", messagesHandler)
 	r.POST("/v1/messages/count_tokens", messages.CountTokensHandler(envCfg, cfgManager, channelScheduler))
 
@@ -312,14 +323,14 @@ func main() {
 	r.GET("/v1/models/:model", messages.ModelsDetailHandler(envCfg, cfgManager, channelScheduler))
 
 	// 代理端点 - Responses API
-	responsesHandler := responses.NewHandler(envCfg, cfgManager, sessionManager, channelScheduler, billingClient, billingHandler, liveRequestManager, metricsStore)
+	responsesHandler := responses.NewHandler(envCfg, cfgManager, sessionManager, channelScheduler, billingClient, billingHandler, liveRequestManager, metricsStore, requestLogStore)
 	r.POST("/v1/responses", responsesHandler)
 	r.POST("/v1/responses/compact", responses.CompactHandler(envCfg, cfgManager, sessionManager, channelScheduler))
 
 	// 代理端点 - Gemini API (原生协议)
 	// 使用通配符捕获 model:action 格式，如 gemini-pro:generateContent
 	// 路径格式：/v1beta/models/{model}:generateContent (Gemini 原生格式)
-	geminiHandler := gemini.NewHandler(envCfg, cfgManager, channelScheduler, liveRequestManager, metricsStore)
+	geminiHandler := gemini.NewHandler(envCfg, cfgManager, channelScheduler, liveRequestManager, metricsStore, requestLogStore)
 	r.POST("/v1beta/models/*modelAction", geminiHandler)
 
 	// 静态文件服务 (嵌入的前端)

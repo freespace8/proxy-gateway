@@ -37,6 +37,9 @@ type EnvConfig struct {
 	LogMaxAge     int  // 保留的旧日志文件最大天数
 	LogCompress   bool // 是否压缩旧日志文件
 	LogToConsole  bool // 是否同时输出到控制台
+	// 请求日志（管理端 /api/{type}/logs）存储策略
+	RequestLogsInMemoryOnly  bool // true=只保存在内存，不写入SQLite
+	RequestLogsMemoryMaxSize int  // 内存请求日志最大条数（默认 500）
 	// 计费配置
 	SweAgentBillingURL    string // swe-agent 计费服务 URL
 	PreAuthAmountCents    int64  // 预授权金额 (cents)
@@ -83,6 +86,8 @@ func NewEnvConfig() *EnvConfig {
 		LogMaxAge:     getEnvAsInt("LOG_MAX_AGE", 30),     // 默认保留 30 天
 		LogCompress:   getEnv("LOG_COMPRESS", "true") != "false",
 		LogToConsole:  getEnv("LOG_TO_CONSOLE", "true") != "false",
+		RequestLogsInMemoryOnly:  getEnv("REQUEST_LOGS_IN_MEMORY_ONLY", "false") == "true",
+		RequestLogsMemoryMaxSize: clampInt(getEnvAsInt("REQUEST_LOGS_MEMORY_MAX_SIZE", 500), 100, 5000),
 		// 计费配置
 		SweAgentBillingURL:    getEnv("SWE_AGENT_BILLING_URL", ""),
 		PreAuthAmountCents:    getEnvAsInt64("PRE_AUTH_AMOUNT_CENTS", 500), // 默认 $5.00

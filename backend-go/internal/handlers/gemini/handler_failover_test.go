@@ -30,7 +30,7 @@ func TestGeminiHandler_NoUpstreamConfiguredReturns503(t *testing.T) {
 	defer cleanupSch()
 
 	envCfg := &config.EnvConfig{ProxyAccessKey: "secret", MaxRequestBodySize: 1024 * 1024}
-	h := NewHandler(envCfg, cfgManager, sch, nil, nil)
+	h := NewHandler(envCfg, cfgManager, sch, nil, nil, nil)
 
 	r := gin.New()
 	r.POST("/v1beta/models/*modelAction", h)
@@ -66,7 +66,7 @@ func TestGeminiHandler_NoAPIKeysReturns503(t *testing.T) {
 	defer cleanupSch()
 
 	envCfg := &config.EnvConfig{ProxyAccessKey: "secret", MaxRequestBodySize: 1024 * 1024}
-	h := NewHandler(envCfg, cfgManager, sch, nil, nil)
+	h := NewHandler(envCfg, cfgManager, sch, nil, nil, nil)
 
 	r := gin.New()
 	r.POST("/v1beta/models/*modelAction", h)
@@ -109,7 +109,7 @@ func TestGeminiHandler_NonFailover400ReturnsUpstream(t *testing.T) {
 	defer cleanupSch()
 
 	envCfg := &config.EnvConfig{ProxyAccessKey: "secret", MaxRequestBodySize: 1024 * 1024}
-	h := NewHandler(envCfg, cfgManager, sch, nil, nil)
+	h := NewHandler(envCfg, cfgManager, sch, nil, nil, nil)
 
 	r := gin.New()
 	r.POST("/v1beta/models/*modelAction", h)
@@ -168,7 +168,7 @@ func TestGeminiHandler_SingleChannel_FailoverKeyThenSuccess(t *testing.T) {
 	defer cleanupSch()
 
 	envCfg := &config.EnvConfig{ProxyAccessKey: "secret", MaxRequestBodySize: 1024 * 1024}
-	h := NewHandler(envCfg, cfgManager, sch, nil, nil)
+	h := NewHandler(envCfg, cfgManager, sch, nil, nil, nil)
 
 	r := gin.New()
 	r.POST("/v1beta/models/*modelAction", h)
@@ -214,7 +214,7 @@ func TestGeminiHandler_AllKeysFail_ReturnsFailoverBody(t *testing.T) {
 	defer cleanupSch()
 
 	envCfg := &config.EnvConfig{ProxyAccessKey: "secret", MaxRequestBodySize: 1024 * 1024}
-	h := NewHandler(envCfg, cfgManager, sch, nil, nil)
+	h := NewHandler(envCfg, cfgManager, sch, nil, nil, nil)
 
 	r := gin.New()
 	r.POST("/v1beta/models/*modelAction", h)

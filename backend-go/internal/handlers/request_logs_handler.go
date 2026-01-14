@@ -11,11 +11,11 @@ import (
 
 // RequestLogsHandler 处理请求日志 API
 type RequestLogsHandler struct {
-	store *metrics.SQLiteStore
+	store metrics.RequestLogStore
 }
 
 // NewRequestLogsHandler 创建 handler
-func NewRequestLogsHandler(store *metrics.SQLiteStore) *RequestLogsHandler {
+func NewRequestLogsHandler(store metrics.RequestLogStore) *RequestLogsHandler {
 	return &RequestLogsHandler{store: store}
 }
 

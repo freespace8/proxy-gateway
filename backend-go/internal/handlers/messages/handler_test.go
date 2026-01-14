@@ -155,7 +155,7 @@ func TestMessagesHandler_SingleChannel_FailoverKeyThenSuccess(t *testing.T) {
 
 	// 传入非 nil billingHandler 覆盖计费分支，但使用 nil client 以避免外部依赖。
 	billingHandler := billing.NewHandler(nil, nil, nil, 0)
-	h := NewHandler(envCfg, cfgManager, sch, nil, billingHandler, nil, sqliteStore)
+	h := NewHandler(envCfg, cfgManager, sch, nil, billingHandler, nil, sqliteStore, sqliteStore)
 
 	r := gin.New()
 	r.POST("/v1/messages", h)
@@ -247,7 +247,7 @@ func TestMessagesHandler_MultiChannel_FailoverToNextChannel(t *testing.T) {
 		ProxyAccessKey:     "secret",
 		MaxRequestBodySize: 1024 * 1024,
 	}
-	h := NewHandler(envCfg, cfgManager, sch, nil, nil, nil, nil)
+	h := NewHandler(envCfg, cfgManager, sch, nil, nil, nil, nil, nil)
 
 	r := gin.New()
 	r.POST("/v1/messages", h)

@@ -31,6 +31,9 @@ services:
       - ENABLE_REQUEST_LOGS=true
       # 是否启用响应日志
       - ENABLE_RESPONSE_LOGS=true
+      # 请求日志只保存在内存（最近 N 条），不写入 SQLite
+      - REQUEST_LOGS_IN_MEMORY_ONLY=true
+      - REQUEST_LOGS_MEMORY_MAX_SIZE=500
       # 等待上游响应头超时时间（秒）
       - RESPONSE_HEADER_TIMEOUT=300
     # 健康检查配置

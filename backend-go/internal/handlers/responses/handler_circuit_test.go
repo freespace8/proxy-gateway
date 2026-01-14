@@ -2,6 +2,7 @@ package responses
 
 import (
 	"bytes"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -106,7 +107,7 @@ func TestResponsesHandler_SingleChannel_SkipsSuspendedKey(t *testing.T) {
 	}
 
 	r := gin.New()
-	r.POST("/v1/responses", NewHandler(envCfg, cfgManager, sessionManager, sch, nil, nil, nil, nil))
+	r.POST("/v1/responses", NewHandler(envCfg, cfgManager, sessionManager, sch, nil, nil, nil, nil, nil))
 
 	reqBody := `{"model":"gpt-4o","input":"hello"}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewBufferString(reqBody))
@@ -208,7 +209,7 @@ func TestResponsesHandler_MultiChannel_BaseURLFailoverWithinChannel(t *testing.T
 	}
 
 	r := gin.New()
-	r.POST("/v1/responses", NewHandler(envCfg, cfgManager, sessionManager, sch, nil, nil, nil, nil))
+	r.POST("/v1/responses", NewHandler(envCfg, cfgManager, sessionManager, sch, nil, nil, nil, nil, nil))
 
 	// 固定路由 key，确保选择到 r0 槽位并覆盖“同渠道多 BaseURL failover”路径
 	routingKey := "conv_baseurl_failover"
@@ -234,5 +235,69 @@ func TestResponsesHandler_MultiChannel_BaseURLFailoverWithinChannel(t *testing.T
 	}
 	if !strings.Contains(w.Body.String(), `"id":"resp_ok"`) {
 		t.Fatalf("unexpected body: %s", w.Body.String())
+	}
+}
+
+func TestResponsesHandler_ClientCanceled_DoesNotRecordFailure(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	var calls atomic.Int64
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer upstream.Close()
+
+	cfg := config.Config{
+		Upstream: []config.UpstreamConfig{},
+		ResponsesUpstream: []config.UpstreamConfig{
+			{
+				Name:        "r0",
+				BaseURL:     upstream.URL,
+				APIKeys:     []string{"rk1"},
+				ServiceType: "responses",
+				Status:      "active",
+				Priority:    1,
+			},
+		},
+		ResponsesLoadBalance: "failover",
+		FuzzyModeEnabled:     true,
+	}
+
+	cfgManager, cleanupCfg := createTestConfigManager(t, cfg)
+	defer cleanupCfg()
+
+	sch, cleanupSch := createTestSchedulerWithMetricsConfig(t, cfgManager)
+	defer cleanupSch()
+
+	sessionManager := session.NewSessionManager(time.Hour, 10, 1000)
+	envCfg := &config.EnvConfig{
+		ProxyAccessKey:     "secret",
+		MaxRequestBodySize: 1024 * 1024,
+	}
+
+	r := gin.New()
+	r.POST("/v1/responses", NewHandler(envCfg, cfgManager, sessionManager, sch, nil, nil, nil, nil, nil))
+
+	reqBody := `{"model":"gpt-4o","input":"hello"}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewBufferString(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-api-key", envCfg.ProxyAccessKey)
+
+	ctx, cancel := context.WithCancel(req.Context())
+	cancel() // 立即取消，模拟请求方断开
+	req = req.WithContext(ctx)
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if calls.Load() != 0 {
+		t.Fatalf("upstream calls=%d, want 0 (canceled before request)", calls.Load())
+	}
+
+	rm := sch.GetResponsesMetricsManager()
+	if km := rm.GetKeyMetrics(upstream.URL, "rk1"); km != nil && km.RequestCount != 0 {
+		t.Fatalf("metrics requestCount=%d, want 0", km.RequestCount)
 	}
 }

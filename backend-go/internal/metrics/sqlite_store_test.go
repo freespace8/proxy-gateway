@@ -1,6 +1,8 @@
 package metrics
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -128,5 +130,33 @@ func TestSQLiteStore_AggregateDailyStats(t *testing.T) {
 	}
 	if count != 2 {
 		t.Fatalf("daily_stats row count after second aggregate = %d, want 2", count)
+	}
+}
+
+func TestSQLiteStore_SelfHealCorruptDB(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "metrics.db")
+
+	// 写入非法内容，模拟损坏的 sqlite 文件
+	if err := os.WriteFile(dbPath, []byte("not-a-sqlite-db"), 0644); err != nil {
+		t.Fatalf("WriteFile() err = %v", err)
+	}
+
+	store, err := NewSQLiteStore(&SQLiteStoreConfig{
+		DBPath:        dbPath,
+		RetentionDays: 7,
+	})
+	if err != nil {
+		t.Fatalf("NewSQLiteStore() err = %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	// 确保 schema 已初始化
+	var cnt int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='request_records'`).Scan(&cnt); err != nil {
+		t.Fatalf("query sqlite_master err = %v", err)
+	}
+	if cnt != 1 {
+		t.Fatalf("request_records table exists = %d, want 1", cnt)
 	}
 }

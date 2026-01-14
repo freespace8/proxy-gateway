@@ -2,12 +2,14 @@ package metrics
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -34,6 +36,9 @@ type SQLiteStore struct {
 	wg      sync.WaitGroup
 	closed  bool           // 是否已关闭
 	flushWg sync.WaitGroup // 追踪异步 flush goroutine
+
+	disabled          atomic.Bool // 是否已禁用持久化（降级为内存模式）
+	corruptionHandling atomic.Bool // 运行期损坏处理互斥
 }
 
 // SQLiteStoreConfig SQLite 存储配置
@@ -72,23 +77,9 @@ func NewSQLiteStore(cfg *SQLiteStoreConfig) (*SQLiteStore, error) {
 		return nil, fmt.Errorf("创建数据库目录失败: %w", err)
 	}
 
-	// 打开数据库连接（WAL 模式 + NORMAL 同步）
-	// modernc.org/sqlite 使用 _pragma= 语法设置 PRAGMA
-	dsn := cfg.DBPath + "?_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)"
-	db, err := sql.Open("sqlite", dsn)
+	db, err := openSQLiteWithSelfHeal(cfg.DBPath)
 	if err != nil {
-		return nil, fmt.Errorf("打开数据库失败: %w", err)
-	}
-
-	// 设置连接池参数
-	db.SetMaxOpenConns(1) // SQLite 单写入连接
-	db.SetMaxIdleConns(1)
-	db.SetConnMaxLifetime(0) // 不限制连接生命周期
-
-	// 初始化表结构
-	if err := initSchema(db); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("初始化数据库 schema 失败: %w", err)
+		return nil, err
 	}
 
 	store := &SQLiteStore{
@@ -111,6 +102,81 @@ func NewSQLiteStore(cfg *SQLiteStoreConfig) (*SQLiteStore, error) {
 
 	log.Printf("[SQLite-Init] 指标存储已初始化: %s (保留 %d 天)", cfg.DBPath, cfg.RetentionDays)
 	return store, nil
+}
+
+func isSQLiteCorruptionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	// 典型错误：
+	// - database disk image is malformed (11)
+	// - file is not a database (26)
+	msg := err.Error()
+	return strings.Contains(msg, "database disk image is malformed") ||
+		strings.Contains(msg, "file is not a database") ||
+		strings.Contains(msg, "malformed")
+}
+
+func checkSQLiteIntegrity(db *sql.DB) error {
+	if db == nil {
+		return errors.New("nil db")
+	}
+	var result string
+	if err := db.QueryRow("PRAGMA integrity_check").Scan(&result); err != nil {
+		return err
+	}
+	if strings.ToLower(strings.TrimSpace(result)) != "ok" {
+		return fmt.Errorf("integrity_check=%s", result)
+	}
+	return nil
+}
+
+func openSQLiteWithSelfHeal(dbPath string) (*sql.DB, error) {
+	// modernc.org/sqlite 使用 _pragma= 语法设置 PRAGMA
+	dsn := dbPath + "?_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)"
+
+	// 最多 2 次：首次尝试；若检测到损坏则删除重建后再试一次
+	for attempt := 1; attempt <= 2; attempt++ {
+		db, err := sql.Open("sqlite", dsn)
+		if err != nil {
+			if isSQLiteCorruptionError(err) && attempt == 1 {
+				_ = os.Remove(dbPath)
+				continue
+			}
+			return nil, fmt.Errorf("打开数据库失败: %w", err)
+		}
+
+		// 设置连接池参数（SQLite 单写入连接）
+		db.SetMaxOpenConns(1)
+		db.SetMaxIdleConns(1)
+		db.SetConnMaxLifetime(0)
+
+		// 健康检查（尽早发现损坏）
+		if err := checkSQLiteIntegrity(db); err != nil {
+			_ = db.Close()
+			if isSQLiteCorruptionError(err) && attempt == 1 {
+				log.Printf("[SQLite-SelfHeal] 警告: 检测到损坏数据库，删除并重建: %v", err)
+				_ = os.Remove(dbPath)
+				continue
+			}
+			return nil, fmt.Errorf("SQLite integrity_check 失败: %w", err)
+		}
+
+		// 初始化表结构
+		if err := initSchema(db); err != nil {
+			_ = db.Close()
+			if isSQLiteCorruptionError(err) && attempt == 1 {
+				log.Printf("[SQLite-SelfHeal] 警告: 初始化 schema 时检测到损坏数据库，删除并重建: %v", err)
+				_ = os.Remove(dbPath)
+				continue
+			}
+			return nil, fmt.Errorf("初始化数据库 schema 失败: %w", err)
+		}
+
+		return db, nil
+	}
+
+	return nil, fmt.Errorf("SQLite 自愈失败: %s", dbPath)
 }
 
 // initSchema 初始化数据库表结构
@@ -270,6 +336,10 @@ func (s *SQLiteStore) AggregateDailyStats(day time.Time) error {
 
 // AddRecord 添加记录到写入缓冲区（非阻塞）
 func (s *SQLiteStore) AddRecord(record PersistentRecord) {
+	if s.disabled.Load() {
+		return
+	}
+
 	s.bufferMu.Lock()
 	if s.closed {
 		s.bufferMu.Unlock()
@@ -304,6 +374,15 @@ func (s *SQLiteStore) FlushNow() {
 
 // flush 刷新缓冲区到数据库
 func (s *SQLiteStore) flush() {
+	if s.disabled.Load() {
+		s.bufferMu.Lock()
+		dropped := len(s.writeBuffer)
+		s.writeBuffer = s.writeBuffer[:0]
+		s.droppedRecords += int64(dropped)
+		s.bufferMu.Unlock()
+		return
+	}
+
 	s.bufferMu.Lock()
 	if len(s.writeBuffer) == 0 {
 		s.bufferMu.Unlock()
@@ -318,6 +397,9 @@ func (s *SQLiteStore) flush() {
 	// 批量写入
 	if err := s.batchInsertWithRetry(records); err != nil {
 		log.Printf("[SQLite-Flush] 警告: 批量写入指标记录失败: %v", err)
+		if isSQLiteCorruptionError(err) {
+			s.handleCorruption(err)
+		}
 		s.requeueOrDropOnFailure(records)
 	}
 }
@@ -375,6 +457,9 @@ func (s *SQLiteStore) batchInsertRecords(records []PersistentRecord) error {
 	if len(records) == 0 {
 		return nil
 	}
+	if s.disabled.Load() || s.db == nil {
+		return errors.New("sqlite disabled")
+	}
 
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -408,6 +493,34 @@ func (s *SQLiteStore) batchInsertRecords(records []PersistentRecord) error {
 	}
 
 	return tx.Commit()
+}
+
+func (s *SQLiteStore) handleCorruption(err error) {
+	if s == nil {
+		return
+	}
+	if !s.corruptionHandling.CompareAndSwap(false, true) {
+		return // 已在处理
+	}
+	defer s.corruptionHandling.Store(false)
+
+	// 尝试重建；失败则禁用持久化，避免持续失败与日志风暴
+	log.Printf("[SQLite-SelfHeal] 警告: 运行期检测到数据库损坏，尝试重建: %v", err)
+
+	if s.db != nil {
+		_ = s.db.Close()
+	}
+	_ = os.Remove(s.dbPath)
+
+	db, openErr := openSQLiteWithSelfHeal(s.dbPath)
+	if openErr != nil {
+		s.disabled.Store(true)
+		s.db = nil
+		log.Printf("[SQLite-SelfHeal] 错误: 重建失败，已禁用指标持久化: %v", openErr)
+		return
+	}
+	s.db = db
+	log.Printf("[SQLite-SelfHeal] 已重建指标数据库: %s", s.dbPath)
 }
 
 // LoadRecords 加载指定时间范围内的记录

@@ -66,7 +66,7 @@ func TestResponsesHandler_Stream_ConvertsOpenAIChatAndPatchesUsage(t *testing.T)
 	}
 
 	r := gin.New()
-	r.POST("/v1/responses", NewHandler(envCfg, cfgManager, sessionManager, sch, nil, nil, nil, nil))
+	r.POST("/v1/responses", NewHandler(envCfg, cfgManager, sessionManager, sch, nil, nil, nil, nil, nil))
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewBufferString(`{"model":"gpt-4o","input":"hello","stream":true}`))
 	req.Header.Set("Content-Type", "application/json")

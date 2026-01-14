@@ -62,7 +62,7 @@ func TestGeminiHandler_WithSQLiteStore_WritesRequestLog_NonStream(t *testing.T) 
 		ProxyAccessKey:     "secret",
 		MaxRequestBodySize: 1024 * 1024,
 	}
-	h := NewHandler(envCfg, cfgManager, sch, live, store)
+	h := NewHandler(envCfg, cfgManager, sch, live, store, store)
 
 	r := gin.New()
 	r.POST("/v1beta/models/*modelAction", h)
@@ -147,7 +147,7 @@ func TestGeminiHandler_WithSQLiteStore_WritesRequestLog_Stream(t *testing.T) {
 		ProxyAccessKey:     "secret",
 		MaxRequestBodySize: 1024 * 1024,
 	}
-	h := NewHandler(envCfg, cfgManager, sch, live, store)
+	h := NewHandler(envCfg, cfgManager, sch, live, store, store)
 
 	r := gin.New()
 	r.POST("/v1beta/models/*modelAction", h)
@@ -180,4 +180,3 @@ func TestGeminiHandler_WithSQLiteStore_WritesRequestLog_Stream(t *testing.T) {
 		t.Fatalf("live requests not cleaned up, count=%d", live.Count())
 	}
 }
-

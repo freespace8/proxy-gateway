@@ -82,7 +82,7 @@ func TestMessagesHandler_MultiChannel_Stream_FailoverToNextChannel(t *testing.T)
 		LogLevel:           "debug",
 	}
 
-	h := NewHandler(envCfg, cfgManager, sch, nil, nil, nil, nil)
+	h := NewHandler(envCfg, cfgManager, sch, nil, nil, nil, nil, nil)
 	r := gin.New()
 	r.POST("/v1/messages", h)
 

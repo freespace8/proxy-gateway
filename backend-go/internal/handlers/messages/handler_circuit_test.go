@@ -2,6 +2,7 @@ package messages
 
 import (
 	"bytes"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -104,7 +105,7 @@ func TestMessagesHandler_SingleChannel_SkipsSuspendedKey(t *testing.T) {
 	}
 
 	r := gin.New()
-	r.POST("/v1/messages", NewHandler(envCfg, cfgManager, sch, nil, nil, nil, nil))
+	r.POST("/v1/messages", NewHandler(envCfg, cfgManager, sch, nil, nil, nil, nil, nil))
 
 	reqBody := `{"model":"claude-3","messages":[{"role":"user","content":"hi"}],"max_tokens":16}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewBufferString(reqBody))
@@ -125,6 +126,68 @@ func TestMessagesHandler_SingleChannel_SkipsSuspendedKey(t *testing.T) {
 	}
 	if !usedGood.Load() {
 		t.Fatalf("expected good key used")
+	}
+}
+
+func TestMessagesHandler_ClientCanceled_DoesNotRecordFailure(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	var calls atomic.Int64
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer upstream.Close()
+
+	cfg := config.Config{
+		Upstream: []config.UpstreamConfig{
+			{
+				Name:        "m0",
+				BaseURL:     upstream.URL,
+				APIKeys:     []string{"mk1"},
+				ServiceType: "claude",
+				Status:      "active",
+				Priority:    1,
+			},
+		},
+		LoadBalance:      "failover",
+		FuzzyModeEnabled: true,
+	}
+
+	cfgManager, cleanupCfg := createTestConfigManager(t, cfg)
+	defer cleanupCfg()
+
+	sch, cleanupSch := createTestSchedulerWithMetricsConfig(t, cfgManager)
+	defer cleanupSch()
+
+	envCfg := &config.EnvConfig{
+		ProxyAccessKey:     "secret",
+		MaxRequestBodySize: 1024 * 1024,
+	}
+
+	r := gin.New()
+	r.POST("/v1/messages", NewHandler(envCfg, cfgManager, sch, nil, nil, nil, nil, nil))
+
+	reqBody := `{"model":"claude-3-5-sonnet-20240620","messages":[{"role":"user","content":"hi"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewBufferString(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-api-key", envCfg.ProxyAccessKey)
+
+	ctx, cancel := context.WithCancel(req.Context())
+	cancel()
+	req = req.WithContext(ctx)
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if calls.Load() != 0 {
+		t.Fatalf("upstream calls=%d, want 0 (canceled before request)", calls.Load())
+	}
+
+	mm := sch.GetMessagesMetricsManager()
+	if km := mm.GetKeyMetrics(upstream.URL, "mk1"); km != nil && km.RequestCount != 0 {
+		t.Fatalf("metrics requestCount=%d, want 0", km.RequestCount)
 	}
 }
 
@@ -204,7 +267,7 @@ func TestMessagesHandler_MultiChannel_BaseURLFailoverWithinChannel(t *testing.T)
 	}
 
 	r := gin.New()
-	r.POST("/v1/messages", NewHandler(envCfg, cfgManager, sch, nil, nil, nil, nil))
+	r.POST("/v1/messages", NewHandler(envCfg, cfgManager, sch, nil, nil, nil, nil, nil))
 
 	reqBody := `{"model":"claude-3","messages":[{"role":"user","content":"hi"}],"max_tokens":16}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewBufferString(reqBody))
@@ -227,4 +290,3 @@ func TestMessagesHandler_MultiChannel_BaseURLFailoverWithinChannel(t *testing.T)
 		t.Fatalf("unexpected body: %s", w.Body.String())
 	}
 }
-

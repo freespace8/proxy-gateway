@@ -36,7 +36,7 @@ func TestMessagesHandler_SingleChannel_NoUpstreamConfigured(t *testing.T) {
 	defer cleanupSch()
 
 	envCfg := &config.EnvConfig{ProxyAccessKey: "secret", MaxRequestBodySize: 1024 * 1024}
-	h := NewHandler(envCfg, cfgManager, sch, nil, nil, nil, nil)
+	h := NewHandler(envCfg, cfgManager, sch, nil, nil, nil, nil, nil)
 
 	r := gin.New()
 	r.POST("/v1/messages", h)
@@ -75,7 +75,7 @@ func TestMessagesHandler_SingleChannel_NoAPIKeysReturns503(t *testing.T) {
 	defer cleanupSch()
 
 	envCfg := &config.EnvConfig{ProxyAccessKey: "secret", MaxRequestBodySize: 1024 * 1024}
-	h := NewHandler(envCfg, cfgManager, sch, nil, nil, nil, nil)
+	h := NewHandler(envCfg, cfgManager, sch, nil, nil, nil, nil, nil)
 
 	r := gin.New()
 	r.POST("/v1/messages", h)
@@ -114,7 +114,7 @@ func TestMessagesHandler_SingleChannel_UnsupportedServiceTypeReturns400(t *testi
 	defer cleanupSch()
 
 	envCfg := &config.EnvConfig{ProxyAccessKey: "secret", MaxRequestBodySize: 1024 * 1024}
-	h := NewHandler(envCfg, cfgManager, sch, nil, nil, nil, nil)
+	h := NewHandler(envCfg, cfgManager, sch, nil, nil, nil, nil, nil)
 
 	r := gin.New()
 	r.POST("/v1/messages", h)
@@ -160,7 +160,7 @@ func TestMessagesHandler_SingleChannel_NonFailover400ReturnsUpstream(t *testing.
 	defer cleanupSch()
 
 	envCfg := &config.EnvConfig{ProxyAccessKey: "secret", MaxRequestBodySize: 1024 * 1024}
-	h := NewHandler(envCfg, cfgManager, sch, nil, nil, nil, nil)
+	h := NewHandler(envCfg, cfgManager, sch, nil, nil, nil, nil, nil)
 
 	r := gin.New()
 	r.POST("/v1/messages", h)
@@ -221,7 +221,7 @@ func TestMessagesHandler_SingleChannel_MissingUsagePatchesTokens(t *testing.T) {
 		Env:                "development",
 		EnableResponseLogs: true,
 	}
-	h := NewHandler(envCfg, cfgManager, sch, nil, nil, nil, nil)
+	h := NewHandler(envCfg, cfgManager, sch, nil, nil, nil, nil, nil)
 
 	r := gin.New()
 	r.POST("/v1/messages", h)

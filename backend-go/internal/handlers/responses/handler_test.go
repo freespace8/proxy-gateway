@@ -122,7 +122,7 @@ func TestResponsesHandler_SingleChannel_Success(t *testing.T) {
 		EnableResponseLogs: true,
 	}
 	billingHandler := billing.NewHandler(nil, nil, nil, 0)
-	h := NewHandler(envCfg, cfgManager, sessionManager, sch, nil, billingHandler, nil, sqliteStore)
+	h := NewHandler(envCfg, cfgManager, sessionManager, sch, nil, billingHandler, nil, sqliteStore, sqliteStore)
 
 	r := gin.New()
 	r.POST("/v1/responses", h)
@@ -197,7 +197,7 @@ func TestResponsesHandler_OpenAI_NonStream_DoesNotDoubleCreateSession(t *testing
 	}
 
 	r := gin.New()
-	r.POST("/v1/responses", NewHandler(envCfg, cfgManager, sessionManager, sch, nil, nil, nil, nil))
+	r.POST("/v1/responses", NewHandler(envCfg, cfgManager, sessionManager, sch, nil, nil, nil, nil, nil))
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewBufferString(`{"model":"gpt-4o","input":"hello"}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -288,7 +288,7 @@ func TestResponsesHandler_MultiChannel_FailoverToNextChannel(t *testing.T) {
 		ProxyAccessKey:     "secret",
 		MaxRequestBodySize: 1024 * 1024,
 	}
-	h := NewHandler(envCfg, cfgManager, sessionManager, sch, nil, nil, nil, nil)
+	h := NewHandler(envCfg, cfgManager, sessionManager, sch, nil, nil, nil, nil, nil)
 
 	r := gin.New()
 	r.POST("/v1/responses", h)
@@ -382,7 +382,7 @@ func TestResponsesHandler_Stream_InsertsUsageWhenMissing(t *testing.T) {
 		LogLevel:           "debug",
 	}
 
-	h := NewHandler(envCfg, cfgManager, sessionManager, sch, nil, nil, nil, nil)
+	h := NewHandler(envCfg, cfgManager, sessionManager, sch, nil, nil, nil, nil, nil)
 
 	r := gin.New()
 	r.POST("/v1/responses", h)

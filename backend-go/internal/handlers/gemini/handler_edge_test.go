@@ -51,7 +51,7 @@ func TestGeminiHandler_RequiresProxyAuthEvenIfXGoogAPIKeyProvided(t *testing.T) 
 	defer cleanupSch()
 
 	envCfg := &config.EnvConfig{ProxyAccessKey: "secret", MaxRequestBodySize: 1024 * 1024}
-	h := NewHandler(envCfg, cfgManager, sch, nil, nil)
+	h := NewHandler(envCfg, cfgManager, sch, nil, nil, nil)
 
 	r := gin.New()
 	r.POST("/v1beta/models/*modelAction", h)
@@ -86,7 +86,7 @@ func TestGeminiHandler_InvalidJSONReturns400(t *testing.T) {
 	sch, cleanupSch := createTestScheduler(t, cfgManager)
 	defer cleanupSch()
 
-	h := NewHandler(envCfg, cfgManager, sch, nil, nil)
+	h := NewHandler(envCfg, cfgManager, sch, nil, nil, nil)
 
 	r := gin.New()
 	r.POST("/v1beta/models/*modelAction", h)
@@ -121,7 +121,7 @@ func TestGeminiHandler_MissingModelInURLReturns400(t *testing.T) {
 	sch, cleanupSch := createTestScheduler(t, cfgManager)
 	defer cleanupSch()
 
-	h := NewHandler(envCfg, cfgManager, sch, nil, nil)
+	h := NewHandler(envCfg, cfgManager, sch, nil, nil, nil)
 
 	r := gin.New()
 	r.POST("/v1beta/models/*modelAction", h)

@@ -38,7 +38,7 @@ func TestResponsesHandler_SingleChannel_NoUpstreamConfigured(t *testing.T) {
 	envCfg := &config.EnvConfig{ProxyAccessKey: "secret", MaxRequestBodySize: 1024 * 1024}
 
 	r := gin.New()
-	r.POST("/v1/responses", NewHandler(envCfg, cfgManager, sessionManager, sch, nil, nil, nil, nil))
+	r.POST("/v1/responses", NewHandler(envCfg, cfgManager, sessionManager, sch, nil, nil, nil, nil, nil))
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewBufferString(`{"model":"gpt-4o","input":"hello"}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -78,7 +78,7 @@ func TestResponsesHandler_SingleChannel_NoAPIKeysReturns503(t *testing.T) {
 	envCfg := &config.EnvConfig{ProxyAccessKey: "secret", MaxRequestBodySize: 1024 * 1024}
 
 	r := gin.New()
-	r.POST("/v1/responses", NewHandler(envCfg, cfgManager, sessionManager, sch, nil, nil, nil, nil))
+	r.POST("/v1/responses", NewHandler(envCfg, cfgManager, sessionManager, sch, nil, nil, nil, nil, nil))
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewBufferString(`{"model":"gpt-4o","input":"hello"}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -149,7 +149,7 @@ func TestResponsesHandler_SingleChannel_FailoverKeyThenSuccessAndDeprioritize(t 
 	envCfg := &config.EnvConfig{ProxyAccessKey: "secret", MaxRequestBodySize: 1024 * 1024}
 
 	r := gin.New()
-	r.POST("/v1/responses", NewHandler(envCfg, cfgManager, sessionManager, sch, nil, nil, nil, nil))
+	r.POST("/v1/responses", NewHandler(envCfg, cfgManager, sessionManager, sch, nil, nil, nil, nil, nil))
 
 	// 固定路由到 bad key，确保覆盖“key 失败->切到另一个 key”路径（避免 sessionID 随机导致用例不稳定）。
 	convID := ""
@@ -217,7 +217,7 @@ func TestResponsesHandler_SingleChannel_NonFailover400ReturnsUpstream(t *testing
 	envCfg := &config.EnvConfig{ProxyAccessKey: "secret", MaxRequestBodySize: 1024 * 1024}
 
 	r := gin.New()
-	r.POST("/v1/responses", NewHandler(envCfg, cfgManager, sessionManager, sch, nil, nil, nil, nil))
+	r.POST("/v1/responses", NewHandler(envCfg, cfgManager, sessionManager, sch, nil, nil, nil, nil, nil))
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewBufferString(`{"model":"gpt-4o","input":"hello"}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -257,7 +257,7 @@ func TestResponsesHandler_SingleChannel_InvalidJSONCausesConvertError(t *testing
 	envCfg := &config.EnvConfig{ProxyAccessKey: "secret", MaxRequestBodySize: 1024 * 1024}
 
 	r := gin.New()
-	r.POST("/v1/responses", NewHandler(envCfg, cfgManager, sessionManager, sch, nil, nil, nil, nil))
+	r.POST("/v1/responses", NewHandler(envCfg, cfgManager, sessionManager, sch, nil, nil, nil, nil, nil))
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewBufferString("{"))
 	req.Header.Set("Content-Type", "application/json")

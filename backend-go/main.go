@@ -259,6 +259,11 @@ func main() {
 		responsesAPI.POST("/channels/:id/keys/index/:keyIndex/reset-state", handlers.ResetKeyCircuitStatus(channelScheduler, cfgManager, "responses"))
 		geminiAPI.POST("/channels/:id/keys/index/:keyIndex/reset-state", handlers.ResetKeyCircuitStatus(channelScheduler, cfgManager, "gemini"))
 
+		// Key 元信息（启用/禁用）
+		messagesAPI.PATCH("/channels/:id/keys/index/:keyIndex/meta", handlers.PatchAPIKeyMeta(cfgManager, "messages"))
+		responsesAPI.PATCH("/channels/:id/keys/index/:keyIndex/meta", handlers.PatchAPIKeyMeta(cfgManager, "responses"))
+		geminiAPI.PATCH("/channels/:id/keys/index/:keyIndex/meta", handlers.PatchAPIKeyMeta(cfgManager, "gemini"))
+
 		// 实时请求 API
 		liveRequestsHandler := handlers.NewLiveRequestsHandler(liveRequestManager)
 		messagesAPI.GET("/live", liveRequestsHandler.GetLiveRequests)

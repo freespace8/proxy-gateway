@@ -366,7 +366,8 @@ func tryChannelWithAllKeys(
 	startTime time.Time,
 	reqCtx *requestLogContext,
 ) (bool, string, int, *common.FailoverError, *types.Usage) {
-	if len(upstream.APIKeys) == 0 {
+	enabledKeys := upstream.GetEnabledAPIKeys()
+	if len(enabledKeys) == 0 {
 		return false, "", 0, nil, nil
 	}
 
@@ -380,7 +381,7 @@ func tryChannelWithAllKeys(
 	deprioritizeCandidates := make(map[string]bool)
 
 	// 强制探测模式
-	forceProbeMode := common.AreAllKeysSuspended(metricsManager, upstream.BaseURL, upstream.APIKeys)
+	forceProbeMode := common.AreAllKeysSuspended(metricsManager, upstream.BaseURL, enabledKeys)
 	if forceProbeMode {
 		log.Printf("[Gemini-ForceProbe] 渠道 %s 所有 Key 都被熔断，启用强制探测模式", upstream.Name)
 	}
@@ -394,7 +395,7 @@ func tryChannelWithAllKeys(
 		currentBaseURL := urlResult.URL
 		originalIdx := urlResult.OriginalIdx
 		failedKeys := make(map[string]bool)
-		maxRetries := len(upstream.APIKeys)
+		maxRetries := len(enabledKeys)
 
 		for attempt := 0; attempt < maxRetries; attempt++ {
 			// 请求方已取消，停止重试（不计失败）
@@ -546,18 +547,19 @@ func handleSingleChannel(
 		return
 	}
 
-	if len(upstream.APIKeys) == 0 {
+	enabledKeys := upstream.GetEnabledAPIKeys()
+	if len(enabledKeys) == 0 {
 		if reqCtx != nil {
 			reqCtx.channelIndex = 0
 			reqCtx.channelName = upstream.Name
 			reqCtx.success = false
-			reqCtx.errorMsg = "No API keys configured"
+			reqCtx.errorMsg = "No enabled API keys configured"
 			reqCtx.updateLive()
 		}
 		c.JSON(503, types.GeminiError{
 			Error: types.GeminiErrorDetail{
 				Code:    503,
-				Message: fmt.Sprintf("No API keys configured for upstream \"%s\"", upstream.Name),
+				Message: fmt.Sprintf("No enabled API keys configured for upstream \"%s\"", upstream.Name),
 				Status:  "UNAVAILABLE",
 			},
 		})
@@ -577,7 +579,7 @@ func handleSingleChannel(
 	var lastFailoverError *common.FailoverError
 	deprioritizeCandidates := make(map[string]bool)
 
-	forceProbeMode := common.AreAllKeysSuspended(metricsManager, baseURLs[0], upstream.APIKeys)
+	forceProbeMode := common.AreAllKeysSuspended(metricsManager, baseURLs[0], enabledKeys)
 	if forceProbeMode {
 		log.Printf("[Gemini-ForceProbe] 渠道 %s 所有 Key 都被熔断，启用强制探测模式", upstream.Name)
 	}
@@ -589,7 +591,7 @@ func handleSingleChannel(
 		}
 
 		failedKeys := make(map[string]bool)
-		maxRetries := len(upstream.APIKeys)
+		maxRetries := len(enabledKeys)
 
 		for attempt := 0; attempt < maxRetries; attempt++ {
 			// 请求方已取消，停止重试（不计失败）

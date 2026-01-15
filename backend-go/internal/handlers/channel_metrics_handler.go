@@ -577,6 +577,7 @@ func GetChannelDashboard(cfgManager *config.ConfigManager, sch *scheduler.Channe
 				"baseUrl":            up.BaseURL,
 				"baseUrls":           up.BaseURLs,
 				"apiKeys":            up.APIKeys,
+				"apiKeyMeta":         up.APIKeyMeta,
 				"description":        up.Description,
 				"website":            up.Website,
 				"insecureSkipVerify": up.InsecureSkipVerify,

@@ -294,10 +294,12 @@
 	                    <tr>
 	                      <th style="width: 64px;">序号</th>
 	                      <th>Key</th>
-	                      <th style="width: 110px;">状态</th>
+	                      <th style="width: 220px;">描述</th>
+	                      <th style="width: 110px;">熔断</th>
                       <th style="width: 120px;">成功率</th>
                       <th style="width: 110px;">请求</th>
                       <th style="width: 140px;">连续失败</th>
+                      <th style="width: 130px;">状态</th>
                       <th style="width: 200px;">操作</th>
                     </tr>
                   </thead>
@@ -308,6 +310,7 @@
                     >
                       <td class="text-caption">{{ keyIndex + 1 }}</td>
                       <td class="text-caption">{{ km.keyMask }}</td>
+                      <td class="text-caption">{{ getAPIKeyDescription(element, keyIndex) }}</td>
                       <td>
                         <v-chip
                           v-if="km.circuitBroken"
@@ -322,6 +325,19 @@
 	                      <td>{{ km.successRate?.toFixed(0) }}%</td>
 	                      <td>{{ km.requestCount }}</td>
 	                      <td>{{ km.consecutiveFailures }}</td>
+                        <td>
+                          <div class="d-flex align-center ga-2">
+                            <v-switch
+                              :model-value="isAPIKeyEnabled(element, keyIndex)"
+                              @update:model-value="setAPIKeyEnabled(element, keyIndex, $event)"
+                              :disabled="isAPIKeyMetaUpdating(element.index, keyIndex) || !element.apiKeys?.[keyIndex]"
+                              hide-details
+                              density="compact"
+                              color="success"
+                            />
+                            <span class="text-caption text-medium-emphasis">{{ isAPIKeyEnabled(element, keyIndex) ? '启用' : '禁用' }}</span>
+                          </div>
+                        </td>
 	                      <td>
 	                        <div class="d-flex align-center ga-1">
 	                          <v-btn
@@ -351,7 +367,7 @@
 	                      </td>
 	                    </tr>
                     <tr v-if="(getChannelMetrics(element.index)?.keyMetrics || []).length === 0">
-                      <td colspan="7" class="text-caption text-medium-emphasis py-3">暂无 Key 指标</td>
+                      <td colspan="9" class="text-caption text-medium-emphasis py-3">暂无 Key 指标</td>
                     </tr>
                   </tbody>
                 </v-table>
@@ -533,6 +549,79 @@ const LATENCY_VALID_DURATION = 5 * 60 * 1000
 // 用于触发响应式更新的时间戳
 const currentTime = ref(Date.now())
 let latencyCheckTimer: ReturnType<typeof setInterval> | null = null
+
+// Key 元信息开关（启用/禁用）请求中
+const apiKeyMetaUpdating = ref<Record<string, boolean>>({})
+
+const isAPIKeyMetaUpdating = (channelId: number, keyIndex: number): boolean => {
+  return apiKeyMetaUpdating.value[`${channelId}-${keyIndex}`] === true
+}
+
+const getAPIKeyDescription = (channel: Channel, keyIndex: number): string => {
+  const apiKey = channel.apiKeys?.[keyIndex]
+  if (!apiKey) return ''
+  return channel.apiKeyMeta?.[apiKey]?.description || ''
+}
+
+const isAPIKeyEnabled = (channel: Channel, keyIndex: number): boolean => {
+  const apiKey = channel.apiKeys?.[keyIndex]
+  if (!apiKey) return false
+  return channel.apiKeyMeta?.[apiKey]?.disabled !== true
+}
+
+const setAPIKeyEnabled = async (channel: Channel, keyIndex: number, enabled: boolean | null) => {
+  const apiKey = channel.apiKeys?.[keyIndex]
+  if (!apiKey) return
+  if (enabled === null) return
+
+  const key = `${channel.index}-${keyIndex}`
+  if (apiKeyMetaUpdating.value[key]) return
+
+  const prevMeta = channel.apiKeyMeta?.[apiKey] ? { ...channel.apiKeyMeta[apiKey] } : undefined
+  apiKeyMetaUpdating.value[key] = true
+
+  try {
+    // optimistic update
+    if (!channel.apiKeyMeta) channel.apiKeyMeta = {}
+
+    if (!enabled) {
+      channel.apiKeyMeta[apiKey] = { ...(channel.apiKeyMeta[apiKey] || {}), disabled: true }
+    } else if (channel.apiKeyMeta[apiKey]) {
+      const next = { ...channel.apiKeyMeta[apiKey] }
+      delete next.disabled
+      const desc = (next.description || '').trim()
+      if (desc === '') delete next.description
+
+      if (Object.keys(next).length === 0) {
+        delete channel.apiKeyMeta[apiKey]
+      } else {
+        channel.apiKeyMeta[apiKey] = next
+      }
+    }
+
+    if (channel.apiKeyMeta && Object.keys(channel.apiKeyMeta).length === 0) {
+      channel.apiKeyMeta = undefined
+    }
+
+    await api.setAPIKeyDisabled(props.channelType, channel.index, keyIndex, !enabled)
+  } catch (error) {
+    // revert
+    if (prevMeta) {
+      if (!channel.apiKeyMeta) channel.apiKeyMeta = {}
+      channel.apiKeyMeta[apiKey] = prevMeta
+    } else if (channel.apiKeyMeta) {
+      delete channel.apiKeyMeta[apiKey]
+      if (Object.keys(channel.apiKeyMeta).length === 0) {
+        channel.apiKeyMeta = undefined
+      }
+    }
+
+    const errorMessage = error instanceof Error ? error.message : '未知错误'
+    emit('error', `更新 Key 状态失败: ${errorMessage}`)
+  } finally {
+    apiKeyMetaUpdating.value[key] = false
+  }
+}
 
 	// 统计图表展开状态（Key 状态始终显示；折叠仅作用于统计图表）
 	const statsExpandedChannelIndex = ref<number | null>(null)

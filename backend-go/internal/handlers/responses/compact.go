@@ -75,8 +75,9 @@ func handleSingleChannelCompact(
 		return
 	}
 
-	if len(upstream.APIKeys) == 0 {
-		c.JSON(503, gin.H{"error": "当前渠道未配置 API 密钥"})
+	enabledKeys := upstream.GetEnabledAPIKeys()
+	if len(enabledKeys) == 0 {
+		c.JSON(503, gin.H{"error": "当前渠道未配置可用 API 密钥"})
 		return
 	}
 
@@ -84,7 +85,7 @@ func handleSingleChannelCompact(
 	failedKeys := make(map[string]bool)
 	var lastErr *compactError
 
-	for attempt := 0; attempt < len(upstream.APIKeys); attempt++ {
+	for attempt := 0; attempt < len(enabledKeys); attempt++ {
 		apiKey, err := cfgManager.GetNextResponsesAPIKey(upstream, failedKeys)
 		if err != nil {
 			break
@@ -197,7 +198,8 @@ func tryCompactChannelWithAllKeys(
 	bodyBytes []byte,
 	envCfg *config.EnvConfig,
 ) (bool, string, *compactError) {
-	if len(upstream.APIKeys) == 0 {
+	enabledKeys := upstream.GetEnabledAPIKeys()
+	if len(enabledKeys) == 0 {
 		return false, "", nil
 	}
 
@@ -207,12 +209,12 @@ func tryCompactChannelWithAllKeys(
 	var lastErr *compactError
 
 	// 强制探测模式
-	forceProbeMode := common.AreAllKeysSuspended(metricsManager, upstream.BaseURL, upstream.APIKeys)
+	forceProbeMode := common.AreAllKeysSuspended(metricsManager, upstream.BaseURL, enabledKeys)
 	if forceProbeMode {
 		log.Printf("[Compact-Probe] 渠道 %s 所有 Key 都被熔断，启用强制探测模式", upstream.Name)
 	}
 
-	for attempt := 0; attempt < len(upstream.APIKeys); attempt++ {
+	for attempt := 0; attempt < len(enabledKeys); attempt++ {
 		apiKey, err := cfgManager.GetNextResponsesAPIKey(upstream, failedKeys)
 		if err != nil {
 			break

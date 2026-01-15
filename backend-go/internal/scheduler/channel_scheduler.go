@@ -120,6 +120,9 @@ func (s *ChannelScheduler) SelectSlot(
 				if apiKey == "" {
 					continue
 				}
+				if upstream.IsAPIKeyDisabled(apiKey) {
+					continue
+				}
 				if failedSlots != nil && failedSlots[slotID(ch.Index, apiKey)] {
 					continue
 				}
@@ -177,6 +180,7 @@ func (s *ChannelScheduler) SelectSlot(
 			if upstream != nil && preferredKeyIdx < len(upstream.APIKeys) {
 				apiKey := upstream.APIKeys[preferredKeyIdx]
 				if apiKey != "" && (failedSlots == nil || !failedSlots[slotID(preferredCh, apiKey)]) &&
+					!upstream.IsAPIKeyDisabled(apiKey) &&
 					(s.configManager == nil || !s.configManager.IsKeyFailed(apiKey)) &&
 					(metricsManager == nil || metricsManager.IsKeyHealthy(upstream.BaseURL, apiKey)) {
 					// 仅 active 渠道可用
@@ -275,15 +279,20 @@ func (s *ChannelScheduler) SelectChannel(
 	if promotedChannel != nil && !failedChannels[promotedChannel.Index] {
 		// 促销渠道存在且未失败，直接使用（不检查健康状态，让用户设置的促销渠道有机会尝试）
 		upstream := s.getUpstreamByIndex(promotedChannel.Index, isResponses)
-		if upstream != nil && len(upstream.APIKeys) > 0 {
-			failureRate := metricsManager.CalculateChannelFailureRate(upstream.BaseURL, upstream.APIKeys)
-			log.Printf("[Scheduler-Promotion] 促销期优先选择渠道: [%d] %s (失败率: %.1f%%, 绕过健康检查)", promotedChannel.Index, upstream.Name, failureRate*100)
-			return &SelectionResult{
-				Upstream:     upstream,
-				ChannelIndex: promotedChannel.Index,
-				Reason:       "promotion_priority",
-			}, nil
-		} else if upstream != nil {
+		if upstream != nil {
+			enabledKeys := upstream.GetEnabledAPIKeys()
+			if len(enabledKeys) > 0 {
+				failureRate := 0.0
+				if metricsManager != nil {
+					failureRate = metricsManager.CalculateChannelFailureRate(upstream.BaseURL, enabledKeys)
+				}
+				log.Printf("[Scheduler-Promotion] 促销期优先选择渠道: [%d] %s (失败率: %.1f%%, 绕过健康检查)", promotedChannel.Index, upstream.Name, failureRate*100)
+				return &SelectionResult{
+					Upstream:     upstream,
+					ChannelIndex: promotedChannel.Index,
+					Reason:       "promotion_priority",
+				}, nil
+			}
 			log.Printf("[Scheduler-Promotion] 警告: 促销渠道 [%d] %s 无可用密钥，跳过", promotedChannel.Index, upstream.Name)
 		}
 	} else if promotedChannel != nil {
@@ -302,13 +311,19 @@ func (s *ChannelScheduler) SelectChannel(
 					}
 					// 检查渠道是否健康
 					upstream := s.getUpstreamByIndex(preferredIdx, isResponses)
-					if upstream != nil && metricsManager.IsChannelHealthyWithKeys(upstream.BaseURL, upstream.APIKeys) {
-						log.Printf("[Scheduler-Affinity] Trace亲和选择渠道: [%d] %s (user: %s)", preferredIdx, upstream.Name, maskUserID(userID))
-						return &SelectionResult{
-							Upstream:     upstream,
-							ChannelIndex: preferredIdx,
-							Reason:       "trace_affinity",
-						}, nil
+					if upstream != nil {
+						enabledKeys := upstream.GetEnabledAPIKeys()
+						if len(enabledKeys) == 0 {
+							continue
+						}
+						if metricsManager == nil || metricsManager.IsChannelHealthyWithKeys(upstream.BaseURL, enabledKeys) {
+							log.Printf("[Scheduler-Affinity] Trace亲和选择渠道: [%d] %s (user: %s)", preferredIdx, upstream.Name, maskUserID(userID))
+							return &SelectionResult{
+								Upstream:     upstream,
+								ChannelIndex: preferredIdx,
+								Reason:       "trace_affinity",
+							}, nil
+						}
 					}
 				}
 			}
@@ -329,13 +344,17 @@ func (s *ChannelScheduler) SelectChannel(
 		}
 
 		upstream := s.getUpstreamByIndex(ch.Index, isResponses)
-		if upstream == nil || len(upstream.APIKeys) == 0 {
+		if upstream == nil {
+			continue
+		}
+		enabledKeys := upstream.GetEnabledAPIKeys()
+		if len(enabledKeys) == 0 {
 			continue
 		}
 
 		// 跳过失败率过高的渠道（已熔断或即将熔断）
-		if !metricsManager.IsChannelHealthyWithKeys(upstream.BaseURL, upstream.APIKeys) {
-			failureRate := metricsManager.CalculateChannelFailureRate(upstream.BaseURL, upstream.APIKeys)
+		if metricsManager != nil && !metricsManager.IsChannelHealthyWithKeys(upstream.BaseURL, enabledKeys) {
+			failureRate := metricsManager.CalculateChannelFailureRate(upstream.BaseURL, enabledKeys)
 			log.Printf("[Scheduler-Channel] 警告: 跳过不健康渠道: [%d] %s (失败率: %.1f%%)", ch.Index, ch.Name, failureRate*100)
 			continue
 		}
@@ -392,11 +411,18 @@ func (s *ChannelScheduler) selectFallbackChannel(
 		}
 
 		upstream := s.getUpstreamByIndex(ch.Index, isResponses)
-		if upstream == nil || len(upstream.APIKeys) == 0 {
+		if upstream == nil {
+			continue
+		}
+		enabledKeys := upstream.GetEnabledAPIKeys()
+		if len(enabledKeys) == 0 {
 			continue
 		}
 
-		failureRate := metricsManager.CalculateChannelFailureRate(upstream.BaseURL, upstream.APIKeys)
+		failureRate := 0.0
+		if metricsManager != nil {
+			failureRate = metricsManager.CalculateChannelFailureRate(upstream.BaseURL, enabledKeys)
+		}
 		if failureRate < bestFailureRate {
 			bestFailureRate = failureRate
 			bestChannel = ch
@@ -584,6 +610,9 @@ func (s *ChannelScheduler) GetActiveSlotCount(isResponses bool) int {
 		}
 		for _, k := range upstream.APIKeys {
 			if k != "" {
+				if upstream.IsAPIKeyDisabled(k) {
+					continue
+				}
 				count++
 			}
 		}
@@ -684,15 +713,20 @@ func (s *ChannelScheduler) SelectGeminiChannel(
 	promotedChannel := s.findPromotedGeminiChannel(activeChannels)
 	if promotedChannel != nil && !failedChannels[promotedChannel.Index] {
 		upstream := s.getGeminiUpstreamByIndex(promotedChannel.Index)
-		if upstream != nil && len(upstream.APIKeys) > 0 {
-			failureRate := metricsManager.CalculateChannelFailureRate(upstream.BaseURL, upstream.APIKeys)
-			log.Printf("[Scheduler-Gemini-Promotion] 促销期优先选择渠道: [%d] %s (失败率: %.1f%%, 绕过健康检查)", promotedChannel.Index, upstream.Name, failureRate*100)
-			return &SelectionResult{
-				Upstream:     upstream,
-				ChannelIndex: promotedChannel.Index,
-				Reason:       "promotion_priority",
-			}, nil
-		} else if upstream != nil {
+		if upstream != nil {
+			enabledKeys := upstream.GetEnabledAPIKeys()
+			if len(enabledKeys) > 0 {
+				failureRate := 0.0
+				if metricsManager != nil {
+					failureRate = metricsManager.CalculateChannelFailureRate(upstream.BaseURL, enabledKeys)
+				}
+				log.Printf("[Scheduler-Gemini-Promotion] 促销期优先选择渠道: [%d] %s (失败率: %.1f%%, 绕过健康检查)", promotedChannel.Index, upstream.Name, failureRate*100)
+				return &SelectionResult{
+					Upstream:     upstream,
+					ChannelIndex: promotedChannel.Index,
+					Reason:       "promotion_priority",
+				}, nil
+			}
 			log.Printf("[Scheduler-Gemini-Promotion] 警告: 促销渠道 [%d] %s 无可用密钥，跳过", promotedChannel.Index, upstream.Name)
 		}
 	} else if promotedChannel != nil {
@@ -709,13 +743,19 @@ func (s *ChannelScheduler) SelectGeminiChannel(
 						continue
 					}
 					upstream := s.getGeminiUpstreamByIndex(preferredIdx)
-					if upstream != nil && metricsManager.IsChannelHealthyWithKeys(upstream.BaseURL, upstream.APIKeys) {
-						log.Printf("[Scheduler-Gemini-Affinity] Trace亲和选择渠道: [%d] %s (user: %s)", preferredIdx, upstream.Name, maskUserID(userID))
-						return &SelectionResult{
-							Upstream:     upstream,
-							ChannelIndex: preferredIdx,
-							Reason:       "trace_affinity",
-						}, nil
+					if upstream != nil {
+						enabledKeys := upstream.GetEnabledAPIKeys()
+						if len(enabledKeys) == 0 {
+							continue
+						}
+						if metricsManager == nil || metricsManager.IsChannelHealthyWithKeys(upstream.BaseURL, enabledKeys) {
+							log.Printf("[Scheduler-Gemini-Affinity] Trace亲和选择渠道: [%d] %s (user: %s)", preferredIdx, upstream.Name, maskUserID(userID))
+							return &SelectionResult{
+								Upstream:     upstream,
+								ChannelIndex: preferredIdx,
+								Reason:       "trace_affinity",
+							}, nil
+						}
 					}
 				}
 			}
@@ -734,12 +774,16 @@ func (s *ChannelScheduler) SelectGeminiChannel(
 		}
 
 		upstream := s.getGeminiUpstreamByIndex(ch.Index)
-		if upstream == nil || len(upstream.APIKeys) == 0 {
+		if upstream == nil {
+			continue
+		}
+		enabledKeys := upstream.GetEnabledAPIKeys()
+		if len(enabledKeys) == 0 {
 			continue
 		}
 
-		if !metricsManager.IsChannelHealthyWithKeys(upstream.BaseURL, upstream.APIKeys) {
-			failureRate := metricsManager.CalculateChannelFailureRate(upstream.BaseURL, upstream.APIKeys)
+		if metricsManager != nil && !metricsManager.IsChannelHealthyWithKeys(upstream.BaseURL, enabledKeys) {
+			failureRate := metricsManager.CalculateChannelFailureRate(upstream.BaseURL, enabledKeys)
 			log.Printf("[Scheduler-Gemini-Channel] 警告: 跳过不健康渠道: [%d] %s (失败率: %.1f%%)", ch.Index, ch.Name, failureRate*100)
 			continue
 		}
@@ -784,6 +828,9 @@ func (s *ChannelScheduler) SelectGeminiSlot(
 			}
 			for keyIndex, apiKey := range upstream.APIKeys {
 				if apiKey == "" {
+					continue
+				}
+				if upstream.IsAPIKeyDisabled(apiKey) {
 					continue
 				}
 				if failedSlots != nil && failedSlots[slotID(ch.Index, apiKey)] {
@@ -843,6 +890,7 @@ func (s *ChannelScheduler) SelectGeminiSlot(
 			if upstream != nil && preferredKeyIdx < len(upstream.APIKeys) {
 				apiKey := upstream.APIKeys[preferredKeyIdx]
 				if apiKey != "" && (failedSlots == nil || !failedSlots[slotID(preferredCh, apiKey)]) &&
+					!upstream.IsAPIKeyDisabled(apiKey) &&
 					(s.configManager == nil || !s.configManager.IsKeyFailed(apiKey)) &&
 					(metricsManager == nil || metricsManager.IsKeyHealthy(upstream.BaseURL, apiKey)) {
 					for _, ch := range activeChannels {
@@ -921,11 +969,18 @@ func (s *ChannelScheduler) selectFallbackGeminiChannel(
 		}
 
 		upstream := s.getGeminiUpstreamByIndex(ch.Index)
-		if upstream == nil || len(upstream.APIKeys) == 0 {
+		if upstream == nil {
+			continue
+		}
+		enabledKeys := upstream.GetEnabledAPIKeys()
+		if len(enabledKeys) == 0 {
 			continue
 		}
 
-		failureRate := metricsManager.CalculateChannelFailureRate(upstream.BaseURL, upstream.APIKeys)
+		failureRate := 0.0
+		if metricsManager != nil {
+			failureRate = metricsManager.CalculateChannelFailureRate(upstream.BaseURL, enabledKeys)
+		}
 		if failureRate < bestFailureRate {
 			bestFailureRate = failureRate
 			bestChannel = ch
@@ -1046,6 +1101,9 @@ func (s *ChannelScheduler) GetActiveGeminiSlotCount() int {
 		}
 		for _, k := range upstream.APIKeys {
 			if k != "" {
+				if upstream.IsAPIKeyDisabled(k) {
+					continue
+				}
 				count++
 			}
 		}

@@ -352,7 +352,8 @@ func tryChannelWithAllKeys(
 	billingCtx *billing.RequestContext,
 	reqCtx *requestLogContext,
 ) (bool, string, int, *common.FailoverError) {
-	if len(upstream.APIKeys) == 0 {
+	enabledKeys := upstream.GetEnabledAPIKeys()
+	if len(enabledKeys) == 0 {
 		return false, "", 0, nil
 	}
 
@@ -371,7 +372,7 @@ func tryChannelWithAllKeys(
 	deprioritizeCandidates := make(map[string]bool)
 
 	// 强制探测模式
-	forceProbeMode := common.AreAllKeysSuspended(metricsManager, upstream.BaseURL, upstream.APIKeys)
+	forceProbeMode := common.AreAllKeysSuspended(metricsManager, upstream.BaseURL, enabledKeys)
 	if forceProbeMode {
 		log.Printf("[Messages-ForceProbe] 渠道 %s 所有 Key 都被熔断，启用强制探测模式", upstream.Name)
 	}
@@ -386,7 +387,7 @@ func tryChannelWithAllKeys(
 		currentBaseURL := urlResult.URL
 		originalIdx := urlResult.OriginalIdx // 原始索引用于指标记录
 		failedKeys := make(map[string]bool)  // 每个 BaseURL 重置失败 Key 列表
-		maxRetries := len(upstream.APIKeys)
+		maxRetries := len(enabledKeys)
 
 		for attempt := 0; attempt < maxRetries; attempt++ {
 			// 请求方已取消，停止重试（不计失败）
@@ -578,16 +579,17 @@ func handleSingleChannel(
 		return
 	}
 
-	if len(upstream.APIKeys) == 0 {
+	enabledKeys := upstream.GetEnabledAPIKeys()
+	if len(enabledKeys) == 0 {
 		if reqCtx != nil {
 			reqCtx.channelIndex = 0
 			reqCtx.channelName = upstream.Name
 			reqCtx.success = false
-			reqCtx.errorMsg = "未配置API密钥"
+			reqCtx.errorMsg = "未配置可用API密钥"
 			reqCtx.updateLive()
 		}
 		c.JSON(503, gin.H{
-			"error": fmt.Sprintf("当前渠道 \"%s\" 未配置API密钥", upstream.Name),
+			"error": fmt.Sprintf("当前渠道 \"%s\" 未配置可用API密钥", upstream.Name),
 			"code":  "NO_API_KEYS",
 		})
 		return
@@ -626,7 +628,7 @@ func handleSingleChannel(
 	deprioritizeCandidates := make(map[string]bool)
 
 	// 强制探测模式：检查首个 BaseURL 的所有 Key 是否都被熔断
-	forceProbeMode := common.AreAllKeysSuspended(metricsManager, baseURLs[0], upstream.APIKeys)
+	forceProbeMode := common.AreAllKeysSuspended(metricsManager, baseURLs[0], enabledKeys)
 	if forceProbeMode {
 		log.Printf("[Messages-ForceProbe] 渠道 %s 所有 Key 都被熔断，启用强制探测模式", upstream.Name)
 	}
@@ -639,7 +641,7 @@ func handleSingleChannel(
 		}
 
 		failedKeys := make(map[string]bool) // 每个 BaseURL 重置失败 Key 列表
-		maxRetries := len(upstream.APIKeys)
+		maxRetries := len(enabledKeys)
 
 		for attempt := 0; attempt < maxRetries; attempt++ {
 			// 请求方已取消，停止重试（不计失败）

@@ -13,17 +13,24 @@ import (
 
 // ============== 核心类型定义 ==============
 
+// APIKeyMeta API Key 元信息
+type APIKeyMeta struct {
+	Disabled    bool   `json:"disabled,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+
 // UpstreamConfig 上游配置
 type UpstreamConfig struct {
-	BaseURL            string            `json:"baseUrl"`
-	BaseURLs           []string          `json:"baseUrls,omitempty"` // 多 BaseURL 支持（failover 模式）
-	APIKeys            []string          `json:"apiKeys"`
-	ServiceType        string            `json:"serviceType"` // gemini, openai, claude
-	Name               string            `json:"name,omitempty"`
-	Description        string            `json:"description,omitempty"`
-	Website            string            `json:"website,omitempty"`
-	InsecureSkipVerify bool              `json:"insecureSkipVerify,omitempty"`
-	ModelMapping       map[string]string `json:"modelMapping,omitempty"`
+	BaseURL            string                `json:"baseUrl"`
+	BaseURLs           []string              `json:"baseUrls,omitempty"` // 多 BaseURL 支持（failover 模式）
+	APIKeys            []string              `json:"apiKeys"`
+	APIKeyMeta         map[string]APIKeyMeta `json:"apiKeyMeta,omitempty"` // key 元信息（默认启用）
+	ServiceType        string                `json:"serviceType"`          // gemini, openai, claude
+	Name               string                `json:"name,omitempty"`
+	Description        string                `json:"description,omitempty"`
+	Website            string                `json:"website,omitempty"`
+	InsecureSkipVerify bool                  `json:"insecureSkipVerify,omitempty"`
+	ModelMapping       map[string]string     `json:"modelMapping,omitempty"`
 	// 多渠道调度相关字段
 	Priority       int        `json:"priority"`                 // 渠道优先级（数字越小优先级越高，默认按索引）
 	Status         string     `json:"status"`                   // 渠道状态：active（正常）, suspended（暂停）, disabled（备用池）
@@ -33,15 +40,16 @@ type UpstreamConfig struct {
 
 // UpstreamUpdate 用于部分更新 UpstreamConfig
 type UpstreamUpdate struct {
-	Name               *string           `json:"name"`
-	ServiceType        *string           `json:"serviceType"`
-	BaseURL            *string           `json:"baseUrl"`
-	BaseURLs           []string          `json:"baseUrls"`
-	APIKeys            []string          `json:"apiKeys"`
-	Description        *string           `json:"description"`
-	Website            *string           `json:"website"`
-	InsecureSkipVerify *bool             `json:"insecureSkipVerify"`
-	ModelMapping       map[string]string `json:"modelMapping"`
+	Name               *string               `json:"name"`
+	ServiceType        *string               `json:"serviceType"`
+	BaseURL            *string               `json:"baseUrl"`
+	BaseURLs           []string              `json:"baseUrls"`
+	APIKeys            []string              `json:"apiKeys"`
+	APIKeyMeta         map[string]APIKeyMeta `json:"apiKeyMeta"`
+	Description        *string               `json:"description"`
+	Website            *string               `json:"website"`
+	InsecureSkipVerify *bool                 `json:"insecureSkipVerify"`
+	ModelMapping       map[string]string     `json:"modelMapping"`
 	// 多渠道调度相关字段
 	Priority       *int       `json:"priority"`
 	Status         *string    `json:"status"`
@@ -126,18 +134,19 @@ func (cm *ConfigManager) GetConfig() Config {
 
 // GetNextAPIKey 获取下一个 API 密钥（纯 failover 模式）
 func (cm *ConfigManager) GetNextAPIKey(upstream *UpstreamConfig, failedKeys map[string]bool) (string, error) {
-	if len(upstream.APIKeys) == 0 {
+	enabledKeys := upstream.GetEnabledAPIKeys()
+	if len(enabledKeys) == 0 {
 		return "", fmt.Errorf("上游 %s 没有可用的API密钥", upstream.Name)
 	}
 
 	// 单 Key 直接返回
-	if len(upstream.APIKeys) == 1 {
-		return upstream.APIKeys[0], nil
+	if len(enabledKeys) == 1 {
+		return enabledKeys[0], nil
 	}
 
 	// 筛选可用密钥：排除临时失败密钥和内存中的失败密钥
 	availableKeys := []string{}
-	for _, key := range upstream.APIKeys {
+	for _, key := range enabledKeys {
 		if !failedKeys[key] && !cm.isKeyFailed(key) {
 			availableKeys = append(availableKeys, key)
 		}
@@ -149,7 +158,7 @@ func (cm *ConfigManager) GetNextAPIKey(upstream *UpstreamConfig, failedKeys map[
 		oldestTime := time.Now()
 
 		cm.mu.RLock()
-		for _, key := range upstream.APIKeys {
+		for _, key := range enabledKeys {
 			if !failedKeys[key] { // 排除本次请求已经尝试过的密钥
 				if failure, exists := cm.failedKeysCache[key]; exists {
 					if failure.Timestamp.Before(oldestTime) {
@@ -173,13 +182,13 @@ func (cm *ConfigManager) GetNextAPIKey(upstream *UpstreamConfig, failedKeys map[
 	selectedKey := availableKeys[0]
 	// 获取该密钥在原始列表中的索引
 	keyIndex := 0
-	for i, key := range upstream.APIKeys {
+	for i, key := range enabledKeys {
 		if key == selectedKey {
 			keyIndex = i + 1
 			break
 		}
 	}
-	log.Printf("[Config-Key] 故障转移选择密钥 %s (%d/%d)", utils.MaskAPIKey(selectedKey), keyIndex, len(upstream.APIKeys))
+	log.Printf("[Config-Key] 故障转移选择密钥 %s (%d/%d)", utils.MaskAPIKey(selectedKey), keyIndex, len(enabledKeys))
 	return selectedKey, nil
 }
 

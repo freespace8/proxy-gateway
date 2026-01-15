@@ -31,6 +31,7 @@ func GetUpstreams(cfgManager *config.ConfigManager) gin.HandlerFunc {
 				"baseUrl":            up.BaseURL,
 				"baseUrls":           up.BaseURLs,
 				"apiKeys":            up.APIKeys,
+				"apiKeyMeta":         up.APIKeyMeta,
 				"description":        up.Description,
 				"website":            up.Website,
 				"insecureSkipVerify": up.InsecureSkipVerify,

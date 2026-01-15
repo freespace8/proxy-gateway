@@ -265,7 +265,7 @@
                       color="secondary"
                       variant="elevated"
                       @click="addModelMapping"
-                      :disabled="!newMapping.source.trim() || !newMapping.target.trim()"
+                      :disabled="!String(newMapping.source ?? '').trim() || !String(newMapping.target ?? '').trim()"
                     >
                       {{ editingModelMappingSource ? '保存' : '添加' }}
                     </v-btn>
@@ -303,7 +303,7 @@
                       <v-list-item
                         v-for="(key, index) in form.apiKeys"
                         :key="index"
-                        class="mb-2"
+                        class="mb-2 key-list-item"
                         rounded="lg"
                         variant="tonal"
                         :color="duplicateKeyIndex === index ? 'error' : 'surface-variant'"
@@ -317,12 +317,35 @@
 
                         <v-list-item-title>
                           <div class="d-flex align-center justify-space-between">
-                            <code class="text-caption">{{ maskApiKey(key) }}</code>
+                            <code class="text-caption" :class="isAPIKeyDisabled(key) ? 'text-disabled' : ''">{{ maskApiKey(key) }}</code>
                             <v-chip v-if="duplicateKeyIndex === index" size="x-small" color="error" variant="text">
                               重复密钥
                             </v-chip>
                           </div>
                         </v-list-item-title>
+
+                        <v-list-item-subtitle class="mt-2 key-meta-subtitle">
+                          <div class="d-flex align-center ga-3">
+                            <v-switch
+                              :model-value="!isAPIKeyDisabled(key)"
+                              @update:model-value="setAPIKeyEnabled(key, $event)"
+                              hide-details
+                              density="compact"
+                              color="success"
+                              class="key-meta-switch"
+                            />
+                            <v-text-field
+                              :model-value="getAPIKeyDescription(key)"
+                              @update:model-value="setAPIKeyDescription(key, $event)"
+                              label="描述"
+                              placeholder="可选"
+                              variant="underlined"
+                              density="compact"
+                              hide-details
+                              class="flex-grow-1"
+                            />
+                          </div>
+                        </v-list-item-subtitle>
 
                         <template v-slot:append>
                           <div class="d-flex align-center ga-1">
@@ -523,7 +546,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useTheme } from 'vuetify'
-import type { Channel } from '../services/api'
+import type { Channel, APIKeyMeta } from '../services/api'
 import {
   isValidApiKey,
   isValidUrl as isValidQuickInputUrl,
@@ -846,6 +869,7 @@ const handleQuickSubmit = () => {
     baseUrl: detectedBaseUrl.value,
     baseUrls: detectedBaseUrls.value,
     apiKeys: detectedApiKeys.value,
+    apiKeyMeta: {},
     modelMapping: {}
   }
 
@@ -882,37 +906,37 @@ const allSourceModelOptions = computed(() => {
   if (props.channelType === 'gemini') {
     // Gemini API 常用模型别名
     return [
-      { title: 'gemini-2', value: 'gemini-2' },
-      { title: 'gemini-2.5-flash', value: 'gemini-2.5-flash' },
-      { title: 'gemini-2.5-flash-lite', value: 'gemini-2.5-flash-lite' },
-      { title: 'gemini-2.5-flash-image', value: 'gemini-2.5-flash-image' },
-      { title: 'gemini-2.5-flash-preview-tts', value: 'gemini-2.5-flash-preview-tts' },
-      { title: 'gemini-2.5-flash-native-audio-preview-12-2025', value: 'gemini-2.5-flash-native-audio-preview-12-2025' },
-      { title: 'gemini-2.5-pro', value: 'gemini-2.5-pro' },
-      { title: 'gemini-2.5-pro-preview-tts', value: 'gemini-2.5-pro-preview-tts' },
-      { title: 'gemini-3-pro-preview', value: 'gemini-3-pro-preview' },
-      { title: 'gemini-3-flash-preview', value: 'gemini-3-flash-preview' },
-      { title: 'gemini-3-pro-image-preview', value: 'gemini-3-pro-image-preview' }
+      'gemini-2',
+      'gemini-2.5-flash',
+      'gemini-2.5-flash-lite',
+      'gemini-2.5-flash-image',
+      'gemini-2.5-flash-preview-tts',
+      'gemini-2.5-flash-native-audio-preview-12-2025',
+      'gemini-2.5-pro',
+      'gemini-2.5-pro-preview-tts',
+      'gemini-3-pro-preview',
+      'gemini-3-flash-preview',
+      'gemini-3-pro-image-preview'
     ]
   }
   if (props.channelType === 'responses') {
     // Responses API (Codex) 常用模型名称
     return [
-      { title: 'codex', value: 'codex' },
-      { title: 'gpt-5', value: 'gpt-5' },
-      { title: 'gpt-5.2-codex', value: 'gpt-5.2-codex' },
-      { title: 'gpt-5.2', value: 'gpt-5.2' },
-      { title: 'gpt-5.1-codex-max', value: 'gpt-5.1-codex-max' },
-      { title: 'gpt-5.1-codex', value: 'gpt-5.1-codex' },
-      { title: 'gpt-5.1-codex-mini', value: 'gpt-5.1-codex-mini' },
-      { title: 'gpt-5.1', value: 'gpt-5.1' }
+      'codex',
+      'gpt-5',
+      'gpt-5.2-codex',
+      'gpt-5.2',
+      'gpt-5.1-codex-max',
+      'gpt-5.1-codex',
+      'gpt-5.1-codex-mini',
+      'gpt-5.1'
     ]
   } else {
     // Messages API (Claude) 常用模型别名
     return [
-      { title: 'opus', value: 'opus' },
-      { title: 'sonnet', value: 'sonnet' },
-      { title: 'haiku', value: 'haiku' }
+      'opus',
+      'sonnet',
+      'haiku'
     ]
   }
 })
@@ -920,7 +944,8 @@ const allSourceModelOptions = computed(() => {
 // 可选的源模型选项 - 过滤掉已配置的模型
 const sourceModelOptions = computed(() => {
   const configuredModels = Object.keys(form.modelMapping)
-  return allSourceModelOptions.value.filter(opt => !configuredModels.includes(opt.value))
+  const editingKey = editingModelMappingSource.value
+  return allSourceModelOptions.value.filter(model => !configuredModels.includes(model) || model === editingKey)
 })
 
 // 模型重定向的示例文本 - 根据渠道类型动态显示
@@ -957,6 +982,7 @@ const form = reactive({
   lowQuality: false,
   description: '',
   apiKeys: [] as string[],
+  apiKeyMeta: {} as Record<string, APIKeyMeta>,
   modelMapping: {} as Record<string, string>
 })
 
@@ -1097,6 +1123,52 @@ const maskApiKey = (key: string): string => {
   return key.slice(0, 8) + '***' + key.slice(-5)
 }
 
+const isAPIKeyDisabled = (key: string): boolean => {
+  return form.apiKeyMeta[key]?.disabled === true
+}
+
+const getAPIKeyDescription = (key: string): string => {
+  return form.apiKeyMeta[key]?.description || ''
+}
+
+const cleanupAPIKeyMeta = (key: string) => {
+  const meta = form.apiKeyMeta[key]
+  if (!meta) return
+
+  const hasDisabled = meta.disabled === true
+  const hasDesc = typeof meta.description === 'string' && meta.description.trim() !== ''
+  if (!hasDisabled && !hasDesc) {
+    delete form.apiKeyMeta[key]
+  }
+}
+
+const setAPIKeyEnabled = (key: string, enabled: boolean | null) => {
+  if (!key) return
+  if (enabled === null) return
+  if (!form.apiKeyMeta[key]) form.apiKeyMeta[key] = {}
+
+  if (enabled) {
+    delete form.apiKeyMeta[key].disabled
+  } else {
+    form.apiKeyMeta[key].disabled = true
+  }
+
+  cleanupAPIKeyMeta(key)
+}
+
+const setAPIKeyDescription = (key: string, description: string) => {
+  if (!key) return
+  if (!form.apiKeyMeta[key]) form.apiKeyMeta[key] = {}
+
+  if (description.trim() === '') {
+    delete form.apiKeyMeta[key].description
+  } else {
+    form.apiKeyMeta[key].description = description
+  }
+
+  cleanupAPIKeyMeta(key)
+}
+
 // 表单操作
 const resetForm = () => {
   form.name = ''
@@ -1108,6 +1180,7 @@ const resetForm = () => {
   form.lowQuality = false
   form.description = ''
   form.apiKeys = []
+  form.apiKeyMeta = {}
   form.modelMapping = {}
   newApiKey.value = ''
   newMapping.source = ''
@@ -1156,6 +1229,12 @@ const loadChannelData = (channel: Channel) => {
 
   // 直接存储原始密钥，不需要映射关系
   form.apiKeys = [...channel.apiKeys]
+  form.apiKeyMeta = {}
+  if (channel.apiKeyMeta) {
+    Object.entries(channel.apiKeyMeta).forEach(([k, v]) => {
+      form.apiKeyMeta[k] = { ...v }
+    })
+  }
 
   // 清空原始密钥映射（现在不需要了）
   originalKeyMap.value.clear()
@@ -1195,7 +1274,11 @@ const findDuplicateKeyIndex = (newKey: string): number => {
 }
 
 const removeApiKey = (index: number) => {
+  const removedKey = form.apiKeys[index]
   form.apiKeys.splice(index, 1)
+  if (removedKey) {
+    delete form.apiKeyMeta[removedKey]
+  }
 
   // 如果删除的是当前高亮的重复密钥，清除高亮状态
   if (duplicateKeyIndex.value === index) {
@@ -1204,6 +1287,13 @@ const removeApiKey = (index: number) => {
   } else if (duplicateKeyIndex.value > index) {
     // 如果删除的密钥在高亮密钥之前，调整高亮索引
     duplicateKeyIndex.value--
+  }
+
+  // 调整复制状态索引
+  if (copiedKeyIndex.value === index) {
+    copiedKeyIndex.value = null
+  } else if (copiedKeyIndex.value !== null && copiedKeyIndex.value > index) {
+    copiedKeyIndex.value--
   }
 }
 
@@ -1263,8 +1353,8 @@ const copyApiKey = async (key: string, index: number) => {
 }
 
 const addModelMapping = () => {
-  const source = newMapping.source.trim()
-  const target = newMapping.target.trim()
+  const source = String(newMapping.source ?? '').trim()
+  const target = String(newMapping.target ?? '').trim()
   if (!source || !target) return
 
   // 编辑：允许覆盖、允许改 key
@@ -1315,6 +1405,18 @@ const handleSubmit = async () => {
 
   // 直接使用原始密钥，不需要转换
   const processedApiKeys = form.apiKeys.filter(key => key.trim())
+  const apiKeyMeta: Record<string, APIKeyMeta> = {}
+  processedApiKeys.forEach(apiKey => {
+    const meta = form.apiKeyMeta[apiKey]
+    if (!meta) return
+    const disabled = meta.disabled === true
+    const description = (meta.description || '').trim()
+    if (!disabled && description === '') return
+    apiKeyMeta[apiKey] = {
+      ...(disabled ? { disabled: true } : {}),
+      ...(description ? { description } : {})
+    }
+  })
 
   // 处理 BaseURL：去重（忽略末尾 / 和 # 差异），并移除 UI 专用的尾部 #
   const seenUrls = new Set<string>()
@@ -1341,6 +1443,7 @@ const handleSubmit = async () => {
     lowQuality: form.lowQuality,
     description: form.description.trim(),
     apiKeys: processedApiKeys,
+    apiKeyMeta,
     modelMapping: form.modelMapping
   }
 
@@ -1497,5 +1600,24 @@ onUnmounted(() => {
 .bg-primary .mode-toggle-btn:hover {
   background-color: rgba(255, 255, 255, 0.15) !important;
   border-color: white !important;
+}
+
+/* Key 列表副标题里包含表单控件，需禁用默认的截断/隐藏行为 */
+.v-list-item-subtitle.key-meta-subtitle {
+  display: block;
+  overflow: visible;
+  -webkit-line-clamp: unset;
+  line-height: normal;
+  text-overflow: initial;
+}
+
+/* Vuetify 默认会在 content 区域裁切（overflow:hidden），会把 switch/thumb 裁掉 */
+:deep(.key-list-item .v-list-item__content) {
+  overflow: visible;
+}
+
+/* 给 switch 预留宽度，避免 thumb 覆盖到右侧输入框 */
+.key-meta-switch {
+  min-width: 56px;
 }
 </style>

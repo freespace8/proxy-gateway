@@ -141,6 +141,12 @@ func (u *UpstreamConfig) Clone() *UpstreamConfig {
 		cloned.APIKeys = make([]string, len(u.APIKeys))
 		copy(cloned.APIKeys, u.APIKeys)
 	}
+	if u.APIKeyMeta != nil {
+		cloned.APIKeyMeta = make(map[string]APIKeyMeta, len(u.APIKeyMeta))
+		for k, v := range u.APIKeyMeta {
+			cloned.APIKeyMeta[k] = v
+		}
+	}
 	if u.ModelMapping != nil {
 		cloned.ModelMapping = make(map[string]string, len(u.ModelMapping))
 		for k, v := range u.ModelMapping {

@@ -43,6 +43,7 @@ func (cm *ConfigManager) AddResponsesUpstream(upstream UpstreamConfig) error {
 
 	// 去重 API Keys 和 Base URLs
 	upstream.APIKeys = deduplicateStrings(upstream.APIKeys)
+	upstream.APIKeyMeta = sanitizeAPIKeyMeta(upstream.APIKeyMeta, upstream.APIKeys)
 	upstream.BaseURLs = deduplicateBaseURLs(upstream.BaseURLs)
 
 	cm.config.ResponsesUpstream = append(cm.config.ResponsesUpstream, upstream)
@@ -101,6 +102,10 @@ func (cm *ConfigManager) UpdateResponsesUpstream(index int, updates UpstreamUpda
 			}
 		}
 		upstream.APIKeys = deduplicateStrings(updates.APIKeys)
+		upstream.APIKeyMeta = sanitizeAPIKeyMeta(upstream.APIKeyMeta, upstream.APIKeys)
+	}
+	if updates.APIKeyMeta != nil {
+		upstream.APIKeyMeta = sanitizeAPIKeyMeta(updates.APIKeyMeta, upstream.APIKeys)
 	}
 	if updates.ModelMapping != nil {
 		upstream.ModelMapping = updates.ModelMapping
@@ -200,6 +205,12 @@ func (cm *ConfigManager) RemoveResponsesAPIKey(index int, apiKey string) error {
 
 	if !found {
 		return fmt.Errorf("API密钥不存在")
+	}
+	if cm.config.ResponsesUpstream[index].APIKeyMeta != nil {
+		delete(cm.config.ResponsesUpstream[index].APIKeyMeta, apiKey)
+		if len(cm.config.ResponsesUpstream[index].APIKeyMeta) == 0 {
+			cm.config.ResponsesUpstream[index].APIKeyMeta = nil
+		}
 	}
 
 	if err := cm.saveConfigLocked(cm.config); err != nil {

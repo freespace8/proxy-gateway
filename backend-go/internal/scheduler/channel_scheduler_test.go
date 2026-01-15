@@ -352,3 +352,113 @@ func TestExpiredPromotionNotBypassHealthCheck(t *testing.T) {
 		t.Errorf("期望选择 healthy-channel，实际选择了 %s", result.Upstream.Name)
 	}
 }
+
+func TestSelectSlot_SkipsDisabledKey(t *testing.T) {
+	cfg := config.Config{
+		Upstream: []config.UpstreamConfig{
+			{
+				Name:    "ch1",
+				BaseURL: "https://c1.example.com",
+				APIKeys: []string{"k1a", "k1b"},
+				APIKeyMeta: map[string]config.APIKeyMeta{
+					"k1a": {Disabled: true},
+				},
+				Status:   "active",
+				Priority: 1,
+			},
+		},
+	}
+
+	scheduler, cleanup := createTestScheduler(t, cfg)
+	defer cleanup()
+
+	got, err := scheduler.SelectSlot(context.Background(), "", map[string]bool{}, false)
+	if err != nil {
+		t.Fatalf("SelectSlot err: %v", err)
+	}
+	if got.ChannelIndex != 0 || got.KeyIndex != 1 || got.APIKey != "k1b" {
+		t.Fatalf("unexpected slot: %+v", *got)
+	}
+}
+
+func TestSelectSlot_DoesNotUseDisabledTraceAffinitySlot(t *testing.T) {
+	cfg := config.Config{
+		Upstream: []config.UpstreamConfig{
+			{
+				Name:    "ch1",
+				BaseURL: "https://c1.example.com",
+				APIKeys: []string{"k1a", "k1b"},
+				APIKeyMeta: map[string]config.APIKeyMeta{
+					"k1b": {Disabled: true},
+				},
+				Status:   "active",
+				Priority: 1,
+			},
+		},
+	}
+
+	scheduler, cleanup := createTestScheduler(t, cfg)
+	defer cleanup()
+
+	userID := "pc-789"
+	scheduler.traceAffinity.SetPreferredSlot(userID, 0, 1)
+
+	got, err := scheduler.SelectSlot(context.Background(), userID, map[string]bool{}, false)
+	if err != nil {
+		t.Fatalf("SelectSlot err: %v", err)
+	}
+	if got.ChannelIndex != 0 || got.KeyIndex != 0 || got.APIKey != "k1a" {
+		t.Fatalf("unexpected slot: %+v", *got)
+	}
+	if got.Reason == "trace_affinity" {
+		t.Fatalf("reason=%s want not trace_affinity", got.Reason)
+	}
+}
+
+func TestSelectChannel_IgnoresDisabledKeysForHealth(t *testing.T) {
+	cfg := config.Config{
+		Upstream: []config.UpstreamConfig{
+			{
+				Name:    "ch0",
+				BaseURL: "https://c0.example.com",
+				APIKeys: []string{"k0a", "k0b"},
+				APIKeyMeta: map[string]config.APIKeyMeta{
+					"k0b": {Disabled: true},
+				},
+				Status:   "active",
+				Priority: 1,
+			},
+			{
+				Name:     "ch1",
+				BaseURL:  "https://c1.example.com",
+				APIKeys:  []string{"k1a"},
+				Status:   "active",
+				Priority: 2,
+			},
+		},
+	}
+
+	scheduler, cleanup := createTestScheduler(t, cfg)
+	defer cleanup()
+
+	metricsManager := scheduler.messagesMetricsManager
+	minRequests := metricsManager.GetWindowSize() / 2
+	if minRequests < 3 {
+		minRequests = 3
+	}
+	for i := 0; i < minRequests; i++ {
+		metricsManager.RecordFailure("https://c0.example.com", "k0b")
+	}
+
+	if metricsManager.IsChannelHealthyWithKeys("https://c0.example.com", []string{"k0a", "k0b"}) {
+		t.Fatal("expected channel unhealthy when including disabled key")
+	}
+
+	result, err := scheduler.SelectChannel(context.Background(), "", make(map[int]bool), false)
+	if err != nil {
+		t.Fatalf("SelectChannel err: %v", err)
+	}
+	if result.ChannelIndex != 0 || result.Upstream.Name != "ch0" {
+		t.Fatalf("unexpected channel: %+v", *result)
+	}
+}

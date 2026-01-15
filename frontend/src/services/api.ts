@@ -51,6 +51,11 @@ export interface KeyMetrics {
   circuitBroken: boolean
 }
 
+export interface APIKeyMeta {
+  disabled?: boolean
+  description?: string
+}
+
 export interface ChannelMetrics {
   channelIndex: number
   requestCount: number
@@ -79,6 +84,7 @@ export interface Channel {
   baseUrl: string
   baseUrls?: string[]                // 多 BaseURL 支持（failover 模式）
   apiKeys: string[]
+  apiKeyMeta?: Record<string, APIKeyMeta>
   description?: string
   website?: string
   insecureSkipVerify?: boolean
@@ -756,6 +762,14 @@ class ApiService {
   async resetKeyCircuitStatus(apiType: ApiType, channelId: number, keyIndex: number): Promise<void> {
     await this.request(`/${apiType}/channels/${channelId}/keys/index/${keyIndex}/reset-state`, {
       method: 'POST'
+    })
+  }
+
+  // 设置 Key 启用/禁用（仅影响选 Key；不影响熔断/统计）
+  async setAPIKeyDisabled(apiType: ApiType, channelId: number, keyIndex: number, disabled: boolean): Promise<void> {
+    await this.request(`/${apiType}/channels/${channelId}/keys/index/${keyIndex}/meta`, {
+      method: 'PATCH',
+      body: JSON.stringify({ disabled })
     })
   }
 

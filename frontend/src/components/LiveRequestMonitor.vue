@@ -40,7 +40,7 @@
       <v-list v-if="requests.length" density="compact">
         <v-list-item v-for="req in requests" :key="req.requestId">
           <v-list-item-title class="text-body-2">
-            {{ req.channelName }} · {{ req.model || '--' }}
+            {{ req.channelName }} · {{ formatModel(req.model, req.reasoningEffort) }}
           </v-list-item-title>
           <v-list-item-subtitle class="text-caption text-medium-emphasis">
             {{ req.requestId }}
@@ -92,6 +92,13 @@ function formatElapsed(startTime: string) {
   if (!Number.isFinite(startedAt)) return '--'
   const elapsedMs = Math.max(0, nowMs.value - startedAt)
   return `${(elapsedMs / 1000).toFixed(1)}s`
+}
+
+function formatModel(model: string, reasoningEffort?: string) {
+  const displayModel = (model || '').trim() || '--'
+  const effort = (reasoningEffort || '').trim()
+  if (!effort || displayModel === '--') return displayModel
+  return `${displayModel} (${effort})`
 }
 
 async function fetchLiveRequests() {

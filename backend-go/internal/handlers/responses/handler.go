@@ -26,6 +26,7 @@ import (
 	"github.com/BenedictKing/claude-proxy/internal/utils"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/tidwall/gjson"
 )
 
 type requestLogContext struct {
@@ -33,8 +34,9 @@ type requestLogContext struct {
 	startTime time.Time
 	apiType   string
 
-	model       string
-	isStreaming bool
+	model           string
+	reasoningEffort string
+	isStreaming     bool
 
 	channelIndex int
 	channelName  string
@@ -54,14 +56,15 @@ func (r *requestLogContext) updateLive() {
 		return
 	}
 	r.liveRequestManager.StartRequest(&monitor.LiveRequest{
-		RequestID:    r.requestID,
-		ChannelIndex: r.channelIndex,
-		ChannelName:  r.channelName,
-		KeyMask:      utils.MaskAPIKey(r.apiKey),
-		Model:        r.model,
-		StartTime:    r.startTime,
-		APIType:      r.apiType,
-		IsStreaming:  r.isStreaming,
+		RequestID:       r.requestID,
+		ChannelIndex:    r.channelIndex,
+		ChannelName:     r.channelName,
+		KeyMask:         utils.MaskAPIKey(r.apiKey),
+		Model:           r.model,
+		ReasoningEffort: r.reasoningEffort,
+		StartTime:       r.startTime,
+		APIType:         r.apiType,
+		IsStreaming:     r.isStreaming,
 	})
 }
 
@@ -71,6 +74,34 @@ func truncateErrorMessage(msg string) string {
 		return msg
 	}
 	return msg[:maxLen] + "..."
+}
+
+func extractReasoningEffortFromResponsesBody(bodyBytes []byte) string {
+	if len(bodyBytes) == 0 {
+		return ""
+	}
+	v := gjson.GetBytes(bodyBytes, "reasoning.effort")
+	if !v.Exists() || v.Type != gjson.String {
+		return ""
+	}
+	return strings.TrimSpace(v.String())
+}
+
+func applyUpstreamReasoningEffort(c *gin.Context, reqCtx *requestLogContext) {
+	if c == nil || reqCtx == nil {
+		return
+	}
+
+	v, ok := c.Get(providers.ContextKeyResponsesUpstreamReasoningEffort)
+	if !ok {
+		return
+	}
+	effort, ok := v.(string)
+	if !ok || effort == "" || effort == reqCtx.reasoningEffort {
+		return
+	}
+	reqCtx.reasoningEffort = effort
+	reqCtx.updateLive()
 }
 
 type Handler struct {
@@ -177,6 +208,7 @@ func (h *Handler) Handle(c *gin.Context) {
 			StatusCode:          statusCode,
 			Success:             success,
 			Model:               reqCtx.model,
+			ReasoningEffort:     reqCtx.reasoningEffort,
 			InputTokens:         int64(usage.InputTokens),
 			OutputTokens:        int64(usage.OutputTokens),
 			CacheCreationTokens: int64(usage.CacheCreationInputTokens),
@@ -229,6 +261,7 @@ func (h *Handler) Handle(c *gin.Context) {
 	}
 	// 注意：模型重定向依赖具体 upstream，这里先记录原始 model，后续在选中渠道后覆盖为映射后的 model
 	reqCtx.model = responsesReq.Model
+	reqCtx.reasoningEffort = extractReasoningEffortFromResponsesBody(bodyBytes)
 	reqCtx.isStreaming = responsesReq.Stream
 	reqCtx.updateLive()
 
@@ -467,6 +500,9 @@ func tryChannelWithAllKeys(
 				log.Printf("[Responses-ModelMapping] %s -> %s (channel=%s)", responsesReq.Model, mappedModel, upstreamCopy.Name)
 			}
 
+			if c != nil {
+				c.Set(providers.ContextKeyResponsesUpstreamReasoningEffort, "")
+			}
 			providerReq, _, err := provider.ConvertToProviderRequest(c, upstreamCopy, apiKey)
 
 			if err != nil {
@@ -476,6 +512,8 @@ func tryChannelWithAllKeys(
 				})
 				continue
 			}
+
+			applyUpstreamReasoningEffort(c, reqCtx)
 
 			resp, err := common.SendRequest(providerReq, upstream, envCfg, responsesReq.Stream)
 			if err != nil {
@@ -685,6 +723,9 @@ func handleSingleChannel(
 				log.Printf("[Responses-ModelMapping] %s -> %s (channel=%s)", responsesReq.Model, mappedModel, upstreamCopy.Name)
 			}
 
+			if c != nil {
+				c.Set(providers.ContextKeyResponsesUpstreamReasoningEffort, "")
+			}
 			providerReq, _, err := provider.ConvertToProviderRequest(c, upstreamCopy, apiKey)
 
 			if err != nil {
@@ -695,6 +736,8 @@ func handleSingleChannel(
 				})
 				continue
 			}
+
+			applyUpstreamReasoningEffort(c, reqCtx)
 
 			resp, err := common.SendRequest(providerReq, upstream, envCfg, responsesReq.Stream)
 			if err != nil {

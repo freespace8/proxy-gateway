@@ -71,6 +71,10 @@
           <span class="text-caption">{{ item.model || '--' }}</span>
         </template>
 
+        <template #item.reasoningEffort="{ item }">
+          <span class="text-caption">{{ item.reasoningEffort || '--' }}</span>
+        </template>
+
         <template #item.statusCode="{ item }">
           <v-tooltip v-if="item.errorMessage" location="top" :open-delay="200">
             <template #activator="{ props }">
@@ -140,6 +144,7 @@ const headers = [
   { title: '渠道', key: 'channelName', width: '120px', sortable: false },
   { title: 'Key', key: 'keyMask', width: '100px', sortable: false },
   { title: '模型', key: 'model', width: '180px', sortable: false },
+  { title: '思考', key: 'reasoningEffort', width: '70px', sortable: false },
   { title: '状态', key: 'statusCode', width: '70px', align: 'center', sortable: false },
   { title: '耗时', key: 'durationMs', width: '80px', align: 'end', sortable: false },
   { title: 'Token', key: 'tokens', width: '120px', align: 'end', sortable: false },

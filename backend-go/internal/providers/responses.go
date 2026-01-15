@@ -15,7 +15,12 @@ import (
 	"github.com/BenedictKing/claude-proxy/internal/types"
 	"github.com/BenedictKing/claude-proxy/internal/utils"
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
 )
+
+// ContextKeyResponsesUpstreamReasoningEffort 存储实际上游请求体里的思考档位（优先口径）。
+// 由 ResponsesProvider 写入，供 handler 在请求监控/请求日志中展示。
+const ContextKeyResponsesUpstreamReasoningEffort = "__proxy_gateway_responses_upstream_reasoning_effort"
 
 // ResponsesProvider Responses API 提供商
 type ResponsesProvider struct {
@@ -106,6 +111,12 @@ func (p *ResponsesProvider) ConvertToProviderRequest(
 		return nil, bodyBytes, fmt.Errorf("序列化请求失败: %w", err)
 	}
 
+	if c != nil {
+		if effort := extractReasoningEffortFromUpstreamBody(reqBody); effort != "" {
+			c.Set(ContextKeyResponsesUpstreamReasoningEffort, effort)
+		}
+	}
+
 	// 7. 构建 HTTP 请求
 	targetURL := p.buildTargetURL(upstream)
 	req, err := http.NewRequestWithContext(c.Request.Context(), "POST", targetURL, bytes.NewReader(reqBody))
@@ -157,6 +168,24 @@ func normalizeResponsesReasoningEffort(reqMap map[string]interface{}) {
 	if effort == "minimal" {
 		reasoning["effort"] = "low"
 	}
+}
+
+func extractReasoningEffortFromUpstreamBody(reqBody []byte) string {
+	if len(reqBody) == 0 {
+		return ""
+	}
+
+	if v := gjson.GetBytes(reqBody, "reasoning.effort"); v.Exists() && v.Type == gjson.String {
+		if s := strings.TrimSpace(v.String()); s != "" {
+			return s
+		}
+	}
+	if v := gjson.GetBytes(reqBody, "reasoning_effort"); v.Exists() && v.Type == gjson.String {
+		if s := strings.TrimSpace(v.String()); s != "" {
+			return s
+		}
+	}
+	return ""
 }
 
 // buildTargetURL 根据上游类型构建目标 URL

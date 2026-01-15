@@ -30,7 +30,7 @@ func TestLiveRequestsHandler_GetLiveRequests_FiltersByAPIType(t *testing.T) {
 	base := time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC)
 	m.StartRequest(&monitor.LiveRequest{RequestID: "m1", APIType: "messages", StartTime: base.Add(1 * time.Second)})
 	m.StartRequest(&monitor.LiveRequest{RequestID: "m2", APIType: "messages", StartTime: base.Add(3 * time.Second), IsStreaming: true})
-	m.StartRequest(&monitor.LiveRequest{RequestID: "r1", APIType: "responses", StartTime: base.Add(2 * time.Second)})
+	m.StartRequest(&monitor.LiveRequest{RequestID: "r1", APIType: "responses", StartTime: base.Add(2 * time.Second), ReasoningEffort: "xhigh"})
 
 	t.Run("messages returns only messages sorted desc", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/api/messages/live", nil)
@@ -71,6 +71,9 @@ func TestLiveRequestsHandler_GetLiveRequests_FiltersByAPIType(t *testing.T) {
 		}
 		if resp.Count != 1 || len(resp.Requests) != 1 || resp.Requests[0].RequestID != "r1" {
 			t.Fatalf("resp = %+v, want 1 item r1", resp)
+		}
+		if resp.Requests[0].ReasoningEffort != "xhigh" {
+			t.Fatalf("ReasoningEffort=%q, want %q", resp.Requests[0].ReasoningEffort, "xhigh")
 		}
 	})
 }

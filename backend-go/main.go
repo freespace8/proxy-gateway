@@ -142,16 +142,8 @@ func main() {
 	// 实时请求监控
 	liveRequestManager := monitor.NewLiveRequestManager(50)
 
-	// 请求日志存储：默认使用 SQLite；可配置为仅内存（最近 N 条）
-	var requestLogStore metrics.RequestLogStore
-	if envCfg.RequestLogsInMemoryOnly {
-		requestLogStore = metrics.NewMemoryRequestLogStore(envCfg.RequestLogsMemoryMaxSize)
-	} else {
-		requestLogStore = metricsStore
-		if requestLogStore == nil {
-			requestLogStore = metrics.NewMemoryRequestLogStore(envCfg.RequestLogsMemoryMaxSize)
-		}
-	}
+	// 请求日志存储：固定使用内存环形缓冲（最近 N 条），不写入 SQLite。
+	requestLogStore := metrics.NewMemoryRequestLogStore(envCfg.RequestLogsMemoryMaxSize)
 
 	// 初始化计费相关组件
 	var billingClient *billing.Client

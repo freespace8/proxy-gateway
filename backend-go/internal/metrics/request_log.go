@@ -14,6 +14,7 @@ type RequestLogRecord struct {
 	StatusCode          int       `json:"statusCode"`
 	Success             bool      `json:"success"`
 	Model               string    `json:"model"`
+	ReasoningEffort     string    `json:"reasoningEffort,omitempty"`
 	InputTokens         int64     `json:"inputTokens"`
 	OutputTokens        int64     `json:"outputTokens"`
 	CacheCreationTokens int64     `json:"cacheCreationTokens"`

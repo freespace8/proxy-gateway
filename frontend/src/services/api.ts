@@ -248,6 +248,7 @@ export interface RequestLogRecord {
   statusCode: number
   success: boolean
   model: string
+  reasoningEffort?: string
   inputTokens: number
   outputTokens: number
   cacheCreationTokens: number
@@ -272,6 +273,7 @@ export interface LiveRequest {
   channelName: string
   keyMask: string
   model: string
+  reasoningEffort?: string
   startTime: string
   apiType: string
   isStreaming: boolean

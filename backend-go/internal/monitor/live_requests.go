@@ -8,14 +8,15 @@ import (
 
 // LiveRequest 正在进行的请求
 type LiveRequest struct {
-	RequestID    string    `json:"requestId"`
-	ChannelIndex int       `json:"channelIndex"`
-	ChannelName  string    `json:"channelName"`
-	KeyMask      string    `json:"keyMask"`
-	Model        string    `json:"model"`
-	StartTime    time.Time `json:"startTime"`
-	APIType      string    `json:"apiType"` // messages, responses, gemini
-	IsStreaming  bool      `json:"isStreaming"`
+	RequestID       string    `json:"requestId"`
+	ChannelIndex    int       `json:"channelIndex"`
+	ChannelName     string    `json:"channelName"`
+	KeyMask         string    `json:"keyMask"`
+	Model           string    `json:"model"`
+	ReasoningEffort string    `json:"reasoningEffort,omitempty"`
+	StartTime       time.Time `json:"startTime"`
+	APIType         string    `json:"apiType"` // messages, responses, gemini
+	IsStreaming     bool      `json:"isStreaming"`
 }
 
 // LiveRequestsResponse API 响应

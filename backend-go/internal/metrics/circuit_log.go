@@ -2,7 +2,6 @@ package metrics
 
 import (
 	"crypto/sha256"
-	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"time"
@@ -140,37 +139,4 @@ func safeUTF8SuffixByBytes(s string, n int) string {
 		out = out[1:]
 	}
 	return string(out)
-}
-
-func (s *SQLiteStore) UpsertKeyCircuitLog(apiType, keyID, logStr string) error {
-	if s == nil || s.db == nil {
-		return sql.ErrConnDone
-	}
-	_, err := s.db.Exec(`
-		INSERT INTO key_circuit_logs (api_type, key_id, log, updated_at)
-		VALUES (?, ?, ?, ?)
-		ON CONFLICT(api_type, key_id) DO UPDATE SET
-			log = excluded.log,
-			updated_at = excluded.updated_at
-	`, apiType, keyID, logStr, time.Now().Unix())
-	return err
-}
-
-func (s *SQLiteStore) GetKeyCircuitLog(apiType, keyID string) (string, bool, error) {
-	if s == nil || s.db == nil {
-		return "", false, sql.ErrConnDone
-	}
-	var logStr string
-	err := s.db.QueryRow(`
-		SELECT log
-		FROM key_circuit_logs
-		WHERE api_type = ? AND key_id = ?
-	`, apiType, keyID).Scan(&logStr)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return "", false, nil
-		}
-		return "", false, err
-	}
-	return logStr, true, nil
 }

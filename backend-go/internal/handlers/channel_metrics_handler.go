@@ -372,7 +372,7 @@ func GetChannelMetricsHistory(metricsManager *metrics.MetricsManager, cfgManager
 
 		result := make([]MetricsHistoryResponse, 0, len(upstreams))
 		for i, upstream := range upstreams {
-			// 多端点聚合：24h 内走内存，>24h 走 DB（若启用），否则降级并给出 warning
+			// 多端点聚合：超过内存保留窗口会自动截断并返回 warning
 			dataPoints, warning := metricsManager.GetHistoricalStatsMultiURLWithWarning(upstream.GetAllBaseURLs(), upstream.APIKeys, duration, interval)
 
 			result = append(result, MetricsHistoryResponse{
@@ -509,7 +509,7 @@ func GetChannelKeyMetricsHistory(metricsManager *metrics.MetricsManager, cfgMana
 		var warning string
 		// 为筛选后的 Key 获取历史数据
 		for i, keyInfo := range displayKeys {
-			// 多端点聚合：24h 内走内存，>24h 走 DB（若启用），否则降级并给出 warning
+			// 多端点聚合：超过内存保留窗口会自动截断并返回 warning
 			dataPoints, w := metricsManager.GetKeyHistoricalStatsMultiURLWithWarning(upstream.GetAllBaseURLs(), keyInfo.APIKey, duration, interval)
 			if warning == "" {
 				warning = w
@@ -662,15 +662,23 @@ func GetGeminiChannelMetricsHistory(metricsManager *metrics.MetricsManager, cfgM
 	return func(c *gin.Context) {
 		// 解析 duration 参数
 		durationStr := c.DefaultQuery("duration", "24h")
-		duration, err := time.ParseDuration(durationStr)
-		if err != nil {
-			c.JSON(400, gin.H{"error": "Invalid duration parameter"})
-			return
-		}
 
-		// 限制最大查询范围为 24 小时
-		if duration > 24*time.Hour {
-			duration = 24 * time.Hour
+		var duration time.Duration
+		var err error
+
+		// 特殊处理 "today" 参数
+		if durationStr == "today" {
+			duration = metrics.CalculateTodayDuration()
+			// 如果刚过零点，duration 可能非常小，设置最小值
+			if duration < time.Minute {
+				duration = time.Minute
+			}
+		} else {
+			duration, err = parseDurationParam(durationStr)
+			if err != nil {
+				c.JSON(400, gin.H{"error": "Invalid duration parameter. Use: 1h, 6h, 24h, today, 7d, or 30d"})
+				return
+			}
 		}
 
 		// 解析或自动选择 interval
@@ -693,8 +701,12 @@ func GetGeminiChannelMetricsHistory(metricsManager *metrics.MetricsManager, cfgM
 				interval = time.Minute
 			case duration <= 6*time.Hour:
 				interval = 5 * time.Minute
-			default:
+			case duration <= 24*time.Hour:
 				interval = 15 * time.Minute
+			case duration <= 7*24*time.Hour:
+				interval = 2 * time.Hour
+			default:
+				interval = 24 * time.Hour
 			}
 		}
 
@@ -703,13 +715,14 @@ func GetGeminiChannelMetricsHistory(metricsManager *metrics.MetricsManager, cfgM
 
 		result := make([]MetricsHistoryResponse, 0, len(upstreams))
 		for i, upstream := range upstreams {
-			// 使用多 URL 聚合方法获取历史数据（支持 failover 多端点场景）
-			dataPoints := metricsManager.GetHistoricalStatsMultiURL(upstream.GetAllBaseURLs(), upstream.APIKeys, duration, interval)
+			// 多 URL 聚合：超过内存保留窗口会自动截断并返回 warning
+			dataPoints, warning := metricsManager.GetHistoricalStatsMultiURLWithWarning(upstream.GetAllBaseURLs(), upstream.APIKeys, duration, interval)
 
 			result = append(result, MetricsHistoryResponse{
 				ChannelIndex: i,
 				ChannelName:  upstream.Name,
 				DataPoints:   dataPoints,
+				Warning:      warning,
 			})
 		}
 
@@ -735,16 +748,11 @@ func GetGeminiChannelKeyMetricsHistory(metricsManager *metrics.MetricsManager, c
 				duration = time.Minute
 			}
 		} else {
-			duration, err = time.ParseDuration(durationStr)
+			duration, err = parseDurationParam(durationStr)
 			if err != nil {
-				c.JSON(400, gin.H{"error": "Invalid duration parameter. Use: 1h, 6h, 24h, or today"})
+				c.JSON(400, gin.H{"error": "Invalid duration parameter. Use: 1h, 6h, 24h, today, 7d, or 30d"})
 				return
 			}
-		}
-
-		// 限制最大查询范围为 24 小时
-		if duration > 24*time.Hour {
-			duration = 24 * time.Hour
 		}
 
 		// 解析或自动选择 interval
@@ -767,8 +775,12 @@ func GetGeminiChannelKeyMetricsHistory(metricsManager *metrics.MetricsManager, c
 				interval = time.Minute
 			case duration <= 6*time.Hour:
 				interval = 5 * time.Minute
-			default:
+			case duration <= 24*time.Hour:
 				interval = 15 * time.Minute
+			case duration <= 7*24*time.Hour:
+				interval = 2 * time.Hour
+			default:
+				interval = 24 * time.Hour
 			}
 		}
 
@@ -804,10 +816,14 @@ func GetGeminiChannelKeyMetricsHistory(metricsManager *metrics.MetricsManager, c
 			Keys:         make([]KeyMetricsHistoryResult, 0, len(displayKeys)),
 		}
 
+		var warning string
 		// 为筛选后的 Key 获取历史数据
 		for i, keyInfo := range displayKeys {
-			// 使用多 URL 聚合方法获取单个 Key 的历史数据（支持 failover 多端点场景）
-			dataPoints := metricsManager.GetKeyHistoricalStatsMultiURL(upstream.GetAllBaseURLs(), keyInfo.APIKey, duration, interval)
+			// 多 URL 聚合：超过内存保留窗口会自动截断并返回 warning
+			dataPoints, w := metricsManager.GetKeyHistoricalStatsMultiURLWithWarning(upstream.GetAllBaseURLs(), keyInfo.APIKey, duration, interval)
+			if warning == "" {
+				warning = w
+			}
 
 			// 获取 Key 的颜色
 			color := keyColors[i%len(keyColors)]
@@ -822,6 +838,7 @@ func GetGeminiChannelKeyMetricsHistory(metricsManager *metrics.MetricsManager, c
 			})
 		}
 
+		result.Warning = warning
 		c.JSON(200, result)
 	}
 }

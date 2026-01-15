@@ -5,7 +5,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -64,16 +63,7 @@ func TestResponsesHandler_WritesReasoningEffortToRequestLog_UpstreamWins(t *test
 
 	sessionManager := session.NewSessionManager(time.Hour, 100, 100000)
 
-	dbPath := filepath.Join(t.TempDir(), "metrics.db")
-	sqliteStore, err := metrics.NewSQLiteStore(&metrics.SQLiteStoreConfig{
-		DBPath:        dbPath,
-		RetentionDays: 3,
-	})
-	if err != nil {
-		t.Fatalf("NewSQLiteStore: %v", err)
-	}
-	defer sqliteStore.Close()
-
+	circuitStore := metrics.NewMemoryKeyCircuitLogStore(24 * time.Hour)
 	requestLogs := metrics.NewMemoryRequestLogStore(10)
 	live := monitor.NewLiveRequestManager(10)
 
@@ -81,7 +71,7 @@ func TestResponsesHandler_WritesReasoningEffortToRequestLog_UpstreamWins(t *test
 		ProxyAccessKey:     "secret",
 		MaxRequestBodySize: 1024 * 1024,
 	}
-	h := NewHandler(envCfg, cfgManager, sessionManager, sch, nil, nil, live, sqliteStore, requestLogs)
+	h := NewHandler(envCfg, cfgManager, sessionManager, sch, nil, nil, live, circuitStore, requestLogs)
 
 	r := gin.New()
 	r.POST("/v1/responses", h)

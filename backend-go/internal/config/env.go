@@ -24,9 +24,8 @@ type EnvConfig struct {
 	// 指标配置
 	MetricsWindowSize       int     // 滑动窗口大小
 	MetricsFailureThreshold float64 // 失败率阈值
-	// 指标持久化配置
-	MetricsPersistenceEnabled bool // 是否启用 SQLite 持久化
-	MetricsRetentionDays      int  // 数据保留天数（3-30）
+	// 指标保留配置
+	MetricsRetentionDays int // 数据保留天数（1-7）
 	// HTTP 客户端配置
 	ResponseHeaderTimeout int // 等待响应头超时时间（秒）
 	// 日志文件相关配置
@@ -38,8 +37,7 @@ type EnvConfig struct {
 	LogCompress   bool // 是否压缩旧日志文件
 	LogToConsole  bool // 是否同时输出到控制台
 	// 请求日志（管理端 /api/{type}/logs）存储策略
-	RequestLogsInMemoryOnly  bool // true=只保存在内存，不写入SQLite
-	RequestLogsMemoryMaxSize int  // 内存请求日志最大条数（默认 500）
+	RequestLogsMemoryMaxSize int // 内存请求日志最大条数（默认 500）
 	// 计费配置
 	SweAgentBillingURL    string // swe-agent 计费服务 URL
 	PreAuthAmountCents    int64  // 预授权金额 (cents)
@@ -73,20 +71,18 @@ func NewEnvConfig() *EnvConfig {
 		// 指标配置
 		MetricsWindowSize:       getEnvAsInt("METRICS_WINDOW_SIZE", 50),
 		MetricsFailureThreshold: getEnvAsFloat("METRICS_FAILURE_THRESHOLD", 0.5),
-		// 指标持久化配置
-		MetricsPersistenceEnabled: getEnv("METRICS_PERSISTENCE_ENABLED", "true") != "false",
-		MetricsRetentionDays:      clampInt(getEnvAsInt("METRICS_RETENTION_DAYS", 7), 3, 30),
+		// 指标保留配置
+		MetricsRetentionDays: clampInt(getEnvAsInt("METRICS_RETENTION_DAYS", 7), 1, 7),
 		// HTTP 客户端配置
 		ResponseHeaderTimeout: clampInt(getEnvAsInt("RESPONSE_HEADER_TIMEOUT", 300), 30, 600), // 30-600 秒
 		// 日志文件配置
-		LogDir:        getEnv("LOG_DIR", "logs"),
-		LogFile:       getEnv("LOG_FILE", "app.log"),
-		LogMaxSize:    getEnvAsInt("LOG_MAX_SIZE", 100),   // 默认 100MB
-		LogMaxBackups: getEnvAsInt("LOG_MAX_BACKUPS", 10), // 默认保留 10 个
-		LogMaxAge:     getEnvAsInt("LOG_MAX_AGE", 30),     // 默认保留 30 天
-		LogCompress:   getEnv("LOG_COMPRESS", "true") != "false",
-		LogToConsole:  getEnv("LOG_TO_CONSOLE", "true") != "false",
-		RequestLogsInMemoryOnly:  getEnv("REQUEST_LOGS_IN_MEMORY_ONLY", "false") == "true",
+		LogDir:                   getEnv("LOG_DIR", "logs"),
+		LogFile:                  getEnv("LOG_FILE", "app.log"),
+		LogMaxSize:               getEnvAsInt("LOG_MAX_SIZE", 100),   // 默认 100MB
+		LogMaxBackups:            getEnvAsInt("LOG_MAX_BACKUPS", 10), // 默认保留 10 个
+		LogMaxAge:                getEnvAsInt("LOG_MAX_AGE", 30),     // 默认保留 30 天
+		LogCompress:              getEnv("LOG_COMPRESS", "true") != "false",
+		LogToConsole:             getEnv("LOG_TO_CONSOLE", "true") != "false",
 		RequestLogsMemoryMaxSize: clampInt(getEnvAsInt("REQUEST_LOGS_MEMORY_MAX_SIZE", 500), 100, 5000),
 		// 计费配置
 		SweAgentBillingURL:    getEnv("SWE_AGENT_BILLING_URL", ""),

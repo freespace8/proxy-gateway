@@ -105,15 +105,8 @@ func TestResponsesHandler_SingleChannel_Success(t *testing.T) {
 
 	sessionManager := session.NewSessionManager(time.Hour, 100, 100000)
 
-	dbPath := filepath.Join(t.TempDir(), "metrics.db")
-	sqliteStore, err := metrics.NewSQLiteStore(&metrics.SQLiteStoreConfig{
-		DBPath:        dbPath,
-		RetentionDays: 3,
-	})
-	if err != nil {
-		t.Fatalf("NewSQLiteStore: %v", err)
-	}
-	defer sqliteStore.Close()
+	circuitStore := metrics.NewMemoryKeyCircuitLogStore(24 * time.Hour)
+	requestLogs := metrics.NewMemoryRequestLogStore(200)
 
 	envCfg := &config.EnvConfig{
 		ProxyAccessKey:     "secret",
@@ -122,7 +115,7 @@ func TestResponsesHandler_SingleChannel_Success(t *testing.T) {
 		EnableResponseLogs: true,
 	}
 	billingHandler := billing.NewHandler(nil, nil, nil, 0)
-	h := NewHandler(envCfg, cfgManager, sessionManager, sch, nil, billingHandler, nil, sqliteStore, sqliteStore)
+	h := NewHandler(envCfg, cfgManager, sessionManager, sch, nil, billingHandler, nil, circuitStore, requestLogs)
 
 	r := gin.New()
 	r.POST("/v1/responses", h)

@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/BenedictKing/claude-proxy/internal/config"
 	"github.com/BenedictKing/claude-proxy/internal/metrics"
@@ -14,7 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func TestGeminiHandler_WithSQLiteStore_WritesRequestLog_NonStream(t *testing.T) {
+func TestGeminiHandler_WritesRequestLog_NonStream(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -46,15 +46,8 @@ func TestGeminiHandler_WithSQLiteStore_WritesRequestLog_NonStream(t *testing.T) 
 	sch, cleanupSch := createTestScheduler(t, cfgManager)
 	defer cleanupSch()
 
-	dbPath := filepath.Join(t.TempDir(), "metrics.db")
-	store, err := metrics.NewSQLiteStore(&metrics.SQLiteStoreConfig{
-		DBPath:        dbPath,
-		RetentionDays: 3,
-	})
-	if err != nil {
-		t.Fatalf("NewSQLiteStore: %v", err)
-	}
-	defer store.Close()
+	circuitStore := metrics.NewMemoryKeyCircuitLogStore(24 * time.Hour)
+	requestLogs := metrics.NewMemoryRequestLogStore(200)
 
 	live := monitor.NewLiveRequestManager(10)
 
@@ -62,7 +55,7 @@ func TestGeminiHandler_WithSQLiteStore_WritesRequestLog_NonStream(t *testing.T) 
 		ProxyAccessKey:     "secret",
 		MaxRequestBodySize: 1024 * 1024,
 	}
-	h := NewHandler(envCfg, cfgManager, sch, live, store, store)
+	h := NewHandler(envCfg, cfgManager, sch, live, circuitStore, requestLogs)
 
 	r := gin.New()
 	r.POST("/v1beta/models/*modelAction", h)
@@ -80,7 +73,7 @@ func TestGeminiHandler_WithSQLiteStore_WritesRequestLog_NonStream(t *testing.T) 
 		t.Fatalf("unexpected body=%s", w.Body.String())
 	}
 
-	logs, total, err := store.QueryRequestLogs("gemini", 10, 0)
+	logs, total, err := requestLogs.QueryRequestLogs("gemini", 10, 0)
 	if err != nil {
 		t.Fatalf("QueryRequestLogs: %v", err)
 	}
@@ -99,7 +92,7 @@ func TestGeminiHandler_WithSQLiteStore_WritesRequestLog_NonStream(t *testing.T) 
 	}
 }
 
-func TestGeminiHandler_WithSQLiteStore_WritesRequestLog_Stream(t *testing.T) {
+func TestGeminiHandler_WritesRequestLog_Stream(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -131,15 +124,8 @@ func TestGeminiHandler_WithSQLiteStore_WritesRequestLog_Stream(t *testing.T) {
 	sch, cleanupSch := createTestScheduler(t, cfgManager)
 	defer cleanupSch()
 
-	dbPath := filepath.Join(t.TempDir(), "metrics.db")
-	store, err := metrics.NewSQLiteStore(&metrics.SQLiteStoreConfig{
-		DBPath:        dbPath,
-		RetentionDays: 3,
-	})
-	if err != nil {
-		t.Fatalf("NewSQLiteStore: %v", err)
-	}
-	defer store.Close()
+	circuitStore := metrics.NewMemoryKeyCircuitLogStore(24 * time.Hour)
+	requestLogs := metrics.NewMemoryRequestLogStore(200)
 
 	live := monitor.NewLiveRequestManager(10)
 
@@ -147,7 +133,7 @@ func TestGeminiHandler_WithSQLiteStore_WritesRequestLog_Stream(t *testing.T) {
 		ProxyAccessKey:     "secret",
 		MaxRequestBodySize: 1024 * 1024,
 	}
-	h := NewHandler(envCfg, cfgManager, sch, live, store, store)
+	h := NewHandler(envCfg, cfgManager, sch, live, circuitStore, requestLogs)
 
 	r := gin.New()
 	r.POST("/v1beta/models/*modelAction", h)
@@ -165,7 +151,7 @@ func TestGeminiHandler_WithSQLiteStore_WritesRequestLog_Stream(t *testing.T) {
 		t.Fatalf("expected stream output, got=%s", w.Body.String())
 	}
 
-	logs, total, err := store.QueryRequestLogs("gemini", 10, 0)
+	logs, total, err := requestLogs.QueryRequestLogs("gemini", 10, 0)
 	if err != nil {
 		t.Fatalf("QueryRequestLogs: %v", err)
 	}

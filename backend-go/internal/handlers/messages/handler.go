@@ -76,7 +76,7 @@ type Handler struct {
 	billingHandler   *billing.Handler
 
 	liveRequestManager *monitor.LiveRequestManager
-	sqliteStore        *metrics.SQLiteStore
+	circuitLogStore    metrics.KeyCircuitLogStore
 	requestLogStore    metrics.RequestLogStore
 }
 
@@ -87,7 +87,7 @@ func NewHandler(
 	billingClient *billing.Client,
 	billingHandler *billing.Handler,
 	liveRequestManager *monitor.LiveRequestManager,
-	sqliteStore *metrics.SQLiteStore,
+	circuitLogStore metrics.KeyCircuitLogStore,
 	requestLogStore metrics.RequestLogStore,
 ) gin.HandlerFunc {
 	h := &Handler{
@@ -97,7 +97,7 @@ func NewHandler(
 		billingClient:      billingClient,
 		billingHandler:     billingHandler,
 		liveRequestManager: liveRequestManager,
-		sqliteStore:        sqliteStore,
+		circuitLogStore:    circuitLogStore,
 		requestLogStore:    requestLogStore,
 	}
 	return h.Handle
@@ -239,9 +239,9 @@ func (h *Handler) Handle(c *gin.Context) {
 	isMultiSlot := channelScheduler.IsMultiSlotMode(false)
 
 	if isMultiSlot {
-		handleMultiChannel(c, envCfg, cfgManager, channelScheduler, h.sqliteStore, bodyBytes, claudeReq, userID, startTime, billingHandler, billingCtx, reqCtx)
+		handleMultiChannel(c, envCfg, cfgManager, channelScheduler, h.circuitLogStore, bodyBytes, claudeReq, userID, startTime, billingHandler, billingCtx, reqCtx)
 	} else {
-		handleSingleChannel(c, envCfg, cfgManager, channelScheduler, h.sqliteStore, bodyBytes, claudeReq, startTime, billingHandler, billingCtx, reqCtx)
+		handleSingleChannel(c, envCfg, cfgManager, channelScheduler, h.circuitLogStore, bodyBytes, claudeReq, startTime, billingHandler, billingCtx, reqCtx)
 	}
 }
 
@@ -251,7 +251,7 @@ func handleMultiChannel(
 	envCfg *config.EnvConfig,
 	cfgManager *config.ConfigManager,
 	channelScheduler *scheduler.ChannelScheduler,
-	sqliteStore *metrics.SQLiteStore,
+	circuitLogStore metrics.KeyCircuitLogStore,
 	bodyBytes []byte,
 	claudeReq types.ClaudeRequest,
 	userID string,
@@ -299,7 +299,7 @@ func handleMultiChannel(
 
 		upstreamOneKey := upstream.Clone()
 		upstreamOneKey.APIKeys = []string{selection.APIKey}
-		success, successKey, successBaseURLIdx, failoverErr := tryChannelWithAllKeys(c, envCfg, cfgManager, channelScheduler, sqliteStore, upstreamOneKey, channelIndex, bodyBytes, claudeReq, startTime, billingHandler, billingCtx, reqCtx)
+		success, successKey, successBaseURLIdx, failoverErr := tryChannelWithAllKeys(c, envCfg, cfgManager, channelScheduler, circuitLogStore, upstreamOneKey, channelIndex, bodyBytes, claudeReq, startTime, billingHandler, billingCtx, reqCtx)
 
 		if success {
 			// successKey 为空表示请求方取消导致的提前退出：不记录成功/亲和，也不再继续。
@@ -342,7 +342,7 @@ func tryChannelWithAllKeys(
 	envCfg *config.EnvConfig,
 	cfgManager *config.ConfigManager,
 	channelScheduler *scheduler.ChannelScheduler,
-	sqliteStore *metrics.SQLiteStore,
+	circuitLogStore metrics.KeyCircuitLogStore,
 	upstream *config.UpstreamConfig,
 	channelIndex int,
 	bodyBytes []byte,
@@ -439,7 +439,7 @@ func tryChannelWithAllKeys(
 
 			if err != nil {
 				failedKeys[apiKey] = true
-				common.RecordFailureAndStoreLastFailureLog(sqliteStore, metricsManager, "messages", currentBaseURL, apiKey, 0, nil, err, func() {
+				common.RecordFailureAndStoreLastFailureLog(circuitLogStore, metricsManager, "messages", currentBaseURL, apiKey, 0, nil, err, func() {
 					channelScheduler.RecordFailure(currentBaseURL, apiKey, false)
 				})
 				continue
@@ -453,7 +453,7 @@ func tryChannelWithAllKeys(
 				}
 				failedKeys[apiKey] = true
 				cfgManager.MarkKeyAsFailed(apiKey)
-				common.RecordFailureAndStoreLastFailureLog(sqliteStore, metricsManager, "messages", currentBaseURL, apiKey, 0, nil, err, func() {
+				common.RecordFailureAndStoreLastFailureLog(circuitLogStore, metricsManager, "messages", currentBaseURL, apiKey, 0, nil, err, func() {
 					channelScheduler.RecordFailure(currentBaseURL, apiKey, false)
 				})
 				// 网络错误（超时等）触发 URL 动态降级
@@ -472,7 +472,7 @@ func tryChannelWithAllKeys(
 				if shouldFailover {
 					failedKeys[apiKey] = true
 					cfgManager.MarkKeyAsFailed(apiKey)
-					common.RecordFailureAndStoreLastFailureLog(sqliteStore, metricsManager, "messages", currentBaseURL, apiKey, resp.StatusCode, respBodyBytes, fmt.Errorf("上游错误: %d", resp.StatusCode), func() {
+					common.RecordFailureAndStoreLastFailureLog(circuitLogStore, metricsManager, "messages", currentBaseURL, apiKey, resp.StatusCode, respBodyBytes, fmt.Errorf("上游错误: %d", resp.StatusCode), func() {
 						channelScheduler.RecordFailure(currentBaseURL, apiKey, false)
 					})
 					// HTTP 5xx 等错误也触发 URL 动态降级
@@ -504,7 +504,7 @@ func tryChannelWithAllKeys(
 				}
 
 				// 非 failover 错误，记录失败指标后直接返回
-				common.RecordFailureAndStoreLastFailureLog(sqliteStore, metricsManager, "messages", currentBaseURL, apiKey, resp.StatusCode, respBodyBytes, fmt.Errorf("上游错误: %d", resp.StatusCode), func() {
+				common.RecordFailureAndStoreLastFailureLog(circuitLogStore, metricsManager, "messages", currentBaseURL, apiKey, resp.StatusCode, respBodyBytes, fmt.Errorf("上游错误: %d", resp.StatusCode), func() {
 					channelScheduler.RecordFailure(currentBaseURL, apiKey, false)
 				})
 				if reqCtx != nil {
@@ -557,7 +557,7 @@ func handleSingleChannel(
 	envCfg *config.EnvConfig,
 	cfgManager *config.ConfigManager,
 	channelScheduler *scheduler.ChannelScheduler,
-	sqliteStore *metrics.SQLiteStore,
+	circuitLogStore metrics.KeyCircuitLogStore,
 	bodyBytes []byte,
 	claudeReq types.ClaudeRequest,
 	startTime time.Time,
@@ -692,7 +692,7 @@ func handleSingleChannel(
 			if err != nil {
 				lastError = err
 				failedKeys[apiKey] = true
-				common.RecordFailureAndStoreLastFailureLog(sqliteStore, metricsManager, "messages", currentBaseURL, apiKey, 0, nil, err, func() {
+				common.RecordFailureAndStoreLastFailureLog(circuitLogStore, metricsManager, "messages", currentBaseURL, apiKey, 0, nil, err, func() {
 					channelScheduler.RecordFailure(currentBaseURL, apiKey, false)
 				})
 				continue
@@ -707,7 +707,7 @@ func handleSingleChannel(
 				lastError = err
 				failedKeys[apiKey] = true
 				cfgManager.MarkKeyAsFailed(apiKey)
-				common.RecordFailureAndStoreLastFailureLog(sqliteStore, metricsManager, "messages", currentBaseURL, apiKey, 0, nil, err, func() {
+				common.RecordFailureAndStoreLastFailureLog(circuitLogStore, metricsManager, "messages", currentBaseURL, apiKey, 0, nil, err, func() {
 					channelScheduler.RecordFailure(currentBaseURL, apiKey, false)
 				})
 				log.Printf("[Messages-Key] 警告: API密钥失败: %v", err)
@@ -725,7 +725,7 @@ func handleSingleChannel(
 					lastError = fmt.Errorf("上游错误: %d", resp.StatusCode)
 					failedKeys[apiKey] = true
 					cfgManager.MarkKeyAsFailed(apiKey)
-					common.RecordFailureAndStoreLastFailureLog(sqliteStore, metricsManager, "messages", currentBaseURL, apiKey, resp.StatusCode, respBodyBytes, lastError, func() {
+					common.RecordFailureAndStoreLastFailureLog(circuitLogStore, metricsManager, "messages", currentBaseURL, apiKey, resp.StatusCode, respBodyBytes, lastError, func() {
 						channelScheduler.RecordFailure(currentBaseURL, apiKey, false)
 					})
 
@@ -781,7 +781,7 @@ func handleSingleChannel(
 						log.Printf("[Messages-Response] 错误响应头:\n%s", string(respHeadersJSON))
 					}
 				}
-				common.RecordFailureAndStoreLastFailureLog(sqliteStore, metricsManager, "messages", currentBaseURL, apiKey, resp.StatusCode, respBodyBytes, fmt.Errorf("上游错误: %d", resp.StatusCode), func() {
+				common.RecordFailureAndStoreLastFailureLog(circuitLogStore, metricsManager, "messages", currentBaseURL, apiKey, resp.StatusCode, respBodyBytes, fmt.Errorf("上游错误: %d", resp.StatusCode), func() {
 					channelScheduler.RecordFailure(currentBaseURL, apiKey, false)
 				})
 				if reqCtx != nil {

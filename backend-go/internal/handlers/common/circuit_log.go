@@ -6,7 +6,7 @@ import (
 
 // RecordFailureAndStoreLastFailureLog 记录失败并写入“最后一次失败日志”。
 func RecordFailureAndStoreLastFailureLog(
-	store *metrics.SQLiteStore,
+	store metrics.KeyCircuitLogStore,
 	metricsManager *metrics.MetricsManager,
 	apiType string,
 	baseURL string,

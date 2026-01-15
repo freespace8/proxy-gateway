@@ -4,13 +4,20 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/BenedictKing/claude-proxy/internal/metrics"
 	"github.com/gin-gonic/gin"
 )
+
+type requestLogsErrStore struct{}
+
+func (requestLogsErrStore) AddRequestLog(metrics.RequestLogRecord) error { return nil }
+
+func (requestLogsErrStore) QueryRequestLogs(string, int, int) ([]metrics.RequestLogRecord, int64, error) {
+	return nil, 0, json.Unmarshal([]byte("{"), &struct{}{})
+}
 
 func TestRequestLogsHandler_NilOrMissingStore(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -29,12 +36,7 @@ func TestRequestLogsHandler_NilOrMissingStore(t *testing.T) {
 func TestRequestLogsHandler_GetLogs_ParsesAPITypeAndPagination(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	dbPath := filepath.Join(t.TempDir(), "metrics.db")
-	store, err := metrics.NewSQLiteStore(&metrics.SQLiteStoreConfig{DBPath: dbPath, RetentionDays: 3})
-	if err != nil {
-		t.Fatalf("NewSQLiteStore: %v", err)
-	}
-	t.Cleanup(func() { _ = store.Close() })
+	store := metrics.NewMemoryRequestLogStore(200)
 
 	if err := store.AddRequestLog(metrics.RequestLogRecord{
 		RequestID:    "req_1",
@@ -88,12 +90,7 @@ func TestRequestLogsHandler_GetLogs_ParsesAPITypeAndPagination(t *testing.T) {
 func TestRequestLogsHandler_FallbackToRequestPathAndQueryError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	dbPath := filepath.Join(t.TempDir(), "metrics.db")
-	store, err := metrics.NewSQLiteStore(&metrics.SQLiteStoreConfig{DBPath: dbPath, RetentionDays: 3})
-	if err != nil {
-		t.Fatalf("NewSQLiteStore: %v", err)
-	}
-
+	store := metrics.NewMemoryRequestLogStore(200)
 	h := NewRequestLogsHandler(store)
 
 	// FullPath() is empty when calling handler directly; it should fallback to Request.URL.Path.
@@ -112,14 +109,12 @@ func TestRequestLogsHandler_FallbackToRequestPathAndQueryError(t *testing.T) {
 		t.Fatalf("limit/offset=%d/%d", resp.Limit, resp.Offset)
 	}
 
-	if err := store.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
+	hErr := NewRequestLogsHandler(requestLogsErrStore{})
 
 	w2 := httptest.NewRecorder()
 	c2, _ := gin.CreateTestContext(w2)
 	c2.Request = httptest.NewRequest(http.MethodGet, "/api/messages/logs", nil)
-	h.GetLogs(c2)
+	hErr.GetLogs(c2)
 	if w2.Code != http.StatusInternalServerError {
 		t.Fatalf("status=%d body=%s", w2.Code, w2.Body.String())
 	}

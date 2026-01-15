@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -136,15 +135,8 @@ func TestMessagesHandler_SingleChannel_FailoverKeyThenSuccess(t *testing.T) {
 	sch, cleanupSch := createTestScheduler(t, cfgManager)
 	defer cleanupSch()
 
-	dbPath := filepath.Join(t.TempDir(), "metrics.db")
-	sqliteStore, err := metrics.NewSQLiteStore(&metrics.SQLiteStoreConfig{
-		DBPath:        dbPath,
-		RetentionDays: 3,
-	})
-	if err != nil {
-		t.Fatalf("NewSQLiteStore: %v", err)
-	}
-	defer sqliteStore.Close()
+	circuitStore := metrics.NewMemoryKeyCircuitLogStore(24 * time.Hour)
+	requestLogs := metrics.NewMemoryRequestLogStore(200)
 
 	envCfg := &config.EnvConfig{
 		ProxyAccessKey:     "secret",
@@ -155,7 +147,7 @@ func TestMessagesHandler_SingleChannel_FailoverKeyThenSuccess(t *testing.T) {
 
 	// 传入非 nil billingHandler 覆盖计费分支，但使用 nil client 以避免外部依赖。
 	billingHandler := billing.NewHandler(nil, nil, nil, 0)
-	h := NewHandler(envCfg, cfgManager, sch, nil, billingHandler, nil, sqliteStore, sqliteStore)
+	h := NewHandler(envCfg, cfgManager, sch, nil, billingHandler, nil, circuitStore, requestLogs)
 
 	r := gin.New()
 	r.POST("/v1/messages", h)

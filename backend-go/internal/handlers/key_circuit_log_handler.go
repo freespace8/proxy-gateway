@@ -10,10 +10,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func GetKeyCircuitLog(store *metrics.SQLiteStore, cfgManager *config.ConfigManager, apiType string) gin.HandlerFunc {
+func GetKeyCircuitLog(store metrics.KeyCircuitLogStore, cfgManager *config.ConfigManager, apiType string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if store == nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "metrics persistence disabled"})
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "key circuit log disabled"})
 			return
 		}
 

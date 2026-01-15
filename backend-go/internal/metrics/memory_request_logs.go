@@ -8,7 +8,7 @@ import (
 )
 
 // MemoryRequestLogStore 在内存中保存最近 N 条请求日志（环形缓冲）。
-// 用途：当不希望写入 SQLite（例如磁盘损坏/只需临时排障）时，仍可在管理界面查看近期日志。
+// 用途：用于管理端查看近期日志（内存环形缓冲）。
 type MemoryRequestLogStore struct {
 	mu       sync.RWMutex
 	capacity int
@@ -82,7 +82,7 @@ func (s *MemoryRequestLogStore) QueryRequestLogs(apiType string, limit, offset i
 		}
 	}
 
-	// 与 SQLite 行为对齐：按 timestamp 倒序
+	// 按 timestamp 倒序（最新在前）
 	sort.Slice(filtered, func(i, j int) bool {
 		return filtered[i].Timestamp.After(filtered[j].Timestamp)
 	})

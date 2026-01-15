@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"sync"
 	"syscall"
 	"time"
 
@@ -75,56 +74,18 @@ func main() {
 	)
 	log.Printf("[Session-Init] 会话管理器已初始化")
 
-	// 初始化指标持久化存储（可选）
-	var metricsStore *metrics.SQLiteStore
-	var metricsAggCancel context.CancelFunc
-	var metricsAggWg sync.WaitGroup
-	if envCfg.MetricsPersistenceEnabled {
-		var err error
-		metricsStore, err = metrics.NewSQLiteStore(&metrics.SQLiteStoreConfig{
-			DBPath:        ".config/metrics.db",
-			RetentionDays: envCfg.MetricsRetentionDays,
-		})
-		if err != nil {
-			log.Printf("[Metrics-Init] 警告: 初始化指标持久化存储失败: %v，将使用纯内存模式", err)
-			metricsStore = nil
-		}
-	} else {
-		log.Printf("[Metrics-Init] 指标持久化已禁用，使用纯内存模式")
-	}
-
-	// 指标每日预聚合（daily_stats）：启动回填 + 每日 2:00 聚合前一日
-	if metricsStore != nil {
-		aggCtx, cancel := context.WithCancel(context.Background())
-		metricsAggCancel = cancel
-
-		metricsAggWg.Add(1)
-		go func() {
-			defer metricsAggWg.Done()
-			backfillDailyStats(aggCtx, metricsStore, envCfg.MetricsRetentionDays)
-		}()
-
-		metricsAggWg.Add(1)
-		go func() {
-			defer metricsAggWg.Done()
-			runDailyStatsScheduler(aggCtx, metricsStore)
-		}()
-	}
+	// 指标与 Key 熔断日志：纯内存保留（默认 7 天；由 METRICS_RETENTION_DAYS 控制）
+	metricsRetention := time.Duration(envCfg.MetricsRetentionDays) * 24 * time.Hour
+	keyCircuitLogStore := metrics.NewMemoryKeyCircuitLogStore(metricsRetention)
 
 	// 初始化多渠道调度器（Messages、Responses、Gemini 使用独立的指标管理器）
 	var messagesMetricsManager, responsesMetricsManager, geminiMetricsManager *metrics.MetricsManager
-	if metricsStore != nil {
-		messagesMetricsManager = metrics.NewMetricsManagerWithPersistence(
-			envCfg.MetricsWindowSize, envCfg.MetricsFailureThreshold, metricsStore, "messages")
-		responsesMetricsManager = metrics.NewMetricsManagerWithPersistence(
-			envCfg.MetricsWindowSize, envCfg.MetricsFailureThreshold, metricsStore, "responses")
-		geminiMetricsManager = metrics.NewMetricsManagerWithPersistence(
-			envCfg.MetricsWindowSize, envCfg.MetricsFailureThreshold, metricsStore, "gemini")
-	} else {
-		messagesMetricsManager = metrics.NewMetricsManagerWithConfig(envCfg.MetricsWindowSize, envCfg.MetricsFailureThreshold)
-		responsesMetricsManager = metrics.NewMetricsManagerWithConfig(envCfg.MetricsWindowSize, envCfg.MetricsFailureThreshold)
-		geminiMetricsManager = metrics.NewMetricsManagerWithConfig(envCfg.MetricsWindowSize, envCfg.MetricsFailureThreshold)
-	}
+	messagesMetricsManager = metrics.NewMetricsManagerWithConfig(envCfg.MetricsWindowSize, envCfg.MetricsFailureThreshold)
+	responsesMetricsManager = metrics.NewMetricsManagerWithConfig(envCfg.MetricsWindowSize, envCfg.MetricsFailureThreshold)
+	geminiMetricsManager = metrics.NewMetricsManagerWithConfig(envCfg.MetricsWindowSize, envCfg.MetricsFailureThreshold)
+	messagesMetricsManager.SetRetentionDays(envCfg.MetricsRetentionDays)
+	responsesMetricsManager.SetRetentionDays(envCfg.MetricsRetentionDays)
+	geminiMetricsManager.SetRetentionDays(envCfg.MetricsRetentionDays)
 	traceAffinityManager := session.NewTraceAffinityManager()
 
 	// 初始化 URL 管理器（非阻塞，动态排序）
@@ -142,7 +103,7 @@ func main() {
 	// 实时请求监控
 	liveRequestManager := monitor.NewLiveRequestManager(50)
 
-	// 请求日志存储：固定使用内存环形缓冲（最近 N 条），不写入 SQLite。
+	// 请求日志存储：固定使用内存环形缓冲（最近 N 条）。
 	requestLogStore := metrics.NewMemoryRequestLogStore(envCfg.RequestLogsMemoryMaxSize)
 
 	// 初始化计费相关组件
@@ -286,9 +247,9 @@ func main() {
 
 		// Key 熔断日志 & 重置（每个 key 仅保留 1 条熔断时日志）
 		// 注意：/keys/:apiKey 已用于按 key 字符串操作；此处用 /keys/index/:keyIndex 避免 Gin 路由通配冲突
-		messagesAPI.GET("/channels/:id/keys/index/:keyIndex/circuit-log", handlers.GetKeyCircuitLog(metricsStore, cfgManager, "messages"))
-		responsesAPI.GET("/channels/:id/keys/index/:keyIndex/circuit-log", handlers.GetKeyCircuitLog(metricsStore, cfgManager, "responses"))
-		geminiAPI.GET("/channels/:id/keys/index/:keyIndex/circuit-log", handlers.GetKeyCircuitLog(metricsStore, cfgManager, "gemini"))
+		messagesAPI.GET("/channels/:id/keys/index/:keyIndex/circuit-log", handlers.GetKeyCircuitLog(keyCircuitLogStore, cfgManager, "messages"))
+		responsesAPI.GET("/channels/:id/keys/index/:keyIndex/circuit-log", handlers.GetKeyCircuitLog(keyCircuitLogStore, cfgManager, "responses"))
+		geminiAPI.GET("/channels/:id/keys/index/:keyIndex/circuit-log", handlers.GetKeyCircuitLog(keyCircuitLogStore, cfgManager, "gemini"))
 
 		messagesAPI.POST("/channels/:id/keys/index/:keyIndex/reset", handlers.ResetKeyCircuitState(channelScheduler, cfgManager, "messages"))
 		responsesAPI.POST("/channels/:id/keys/index/:keyIndex/reset", handlers.ResetKeyCircuitState(channelScheduler, cfgManager, "responses"))
@@ -306,7 +267,7 @@ func main() {
 	}
 
 	// 代理端点 - Messages API
-	messagesHandler := messages.NewHandler(envCfg, cfgManager, channelScheduler, billingClient, billingHandler, liveRequestManager, metricsStore, requestLogStore)
+	messagesHandler := messages.NewHandler(envCfg, cfgManager, channelScheduler, billingClient, billingHandler, liveRequestManager, keyCircuitLogStore, requestLogStore)
 	r.POST("/v1/messages", messagesHandler)
 	r.POST("/v1/messages/count_tokens", messages.CountTokensHandler(envCfg, cfgManager, channelScheduler))
 
@@ -315,14 +276,14 @@ func main() {
 	r.GET("/v1/models/:model", messages.ModelsDetailHandler(envCfg, cfgManager, channelScheduler))
 
 	// 代理端点 - Responses API
-	responsesHandler := responses.NewHandler(envCfg, cfgManager, sessionManager, channelScheduler, billingClient, billingHandler, liveRequestManager, metricsStore, requestLogStore)
+	responsesHandler := responses.NewHandler(envCfg, cfgManager, sessionManager, channelScheduler, billingClient, billingHandler, liveRequestManager, keyCircuitLogStore, requestLogStore)
 	r.POST("/v1/responses", responsesHandler)
 	r.POST("/v1/responses/compact", responses.CompactHandler(envCfg, cfgManager, sessionManager, channelScheduler))
 
 	// 代理端点 - Gemini API (原生协议)
 	// 使用通配符捕获 model:action 格式，如 gemini-pro:generateContent
 	// 路径格式：/v1beta/models/{model}:generateContent (Gemini 原生格式)
-	geminiHandler := gemini.NewHandler(envCfg, cfgManager, channelScheduler, liveRequestManager, metricsStore, requestLogStore)
+	geminiHandler := gemini.NewHandler(envCfg, cfgManager, channelScheduler, liveRequestManager, keyCircuitLogStore, requestLogStore)
 	r.POST("/v1beta/models/*modelAction", geminiHandler)
 
 	// 静态文件服务 (嵌入的前端)
@@ -405,19 +366,6 @@ func main() {
 			log.Println("[Server-Shutdown] 服务器已安全关闭")
 		}
 
-		// 关闭指标持久化存储
-		if metricsStore != nil {
-			if metricsAggCancel != nil {
-				metricsAggCancel()
-				metricsAggWg.Wait()
-			}
-			if err := metricsStore.Close(); err != nil {
-				log.Printf("[Metrics-Shutdown] 警告: 关闭指标存储时发生错误: %v", err)
-			} else {
-				log.Println("[Metrics-Shutdown] 指标存储已安全关闭")
-			}
-		}
-
 		// 关闭价格表服务
 		if pricingService != nil {
 			pricingService.Stop()
@@ -439,78 +387,4 @@ func main() {
 	case <-time.After(15 * time.Second):
 		log.Println("[Server-Shutdown] 警告: 等待关闭超时")
 	}
-}
-
-func backfillDailyStats(ctx context.Context, store *metrics.SQLiteStore, retentionDays int) {
-	if store == nil {
-		return
-	}
-	if retentionDays <= 0 {
-		return
-	}
-
-	now := time.Now()
-	loc := now.Location()
-	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
-
-	for i := retentionDays; i >= 1; i-- {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-
-		day := todayStart.AddDate(0, 0, -i)
-		if err := store.AggregateDailyStats(day); err != nil {
-			log.Printf("[Metrics-Aggregate] 警告: daily_stats 回填失败 (%s): %v", day.Format("2006-01-02"), err)
-		}
-	}
-
-	log.Printf("[Metrics-Aggregate] daily_stats 回填完成（最近 %d 天）", retentionDays)
-}
-
-func runDailyStatsScheduler(ctx context.Context, store *metrics.SQLiteStore) {
-	if store == nil {
-		return
-	}
-
-	for {
-		now := time.Now()
-		next := nextLocalTime(now, 2, 0)
-		timer := time.NewTimer(time.Until(next))
-
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return
-		case <-timer.C:
-		}
-
-		// 聚合“昨天”（完整自然日）
-		runAt := time.Now()
-		loc := runAt.Location()
-		todayStart := time.Date(runAt.Year(), runAt.Month(), runAt.Day(), 0, 0, 0, 0, loc)
-		yesterdayStart := todayStart.AddDate(0, 0, -1)
-
-		// 聚合前先尽力刷新落盘，避免遗漏昨日尾部缓冲数据
-		store.FlushNow()
-		if err := store.AggregateDailyStats(yesterdayStart); err != nil {
-			log.Printf("[Metrics-Aggregate] 警告: daily_stats 聚合失败 (%s): %v", yesterdayStart.Format("2006-01-02"), err)
-			continue
-		}
-		log.Printf("[Metrics-Aggregate] daily_stats 聚合完成 (%s)", yesterdayStart.Format("2006-01-02"))
-	}
-}
-
-func nextLocalTime(now time.Time, hour, minute int) time.Time {
-	loc := now.Location()
-	if loc == nil {
-		loc = time.Local
-	}
-
-	target := time.Date(now.Year(), now.Month(), now.Day(), hour, minute, 0, 0, loc)
-	if !now.Before(target) {
-		target = target.AddDate(0, 0, 1)
-	}
-	return target
 }

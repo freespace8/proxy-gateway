@@ -39,4 +39,3 @@ export const formatLocalDateTime = (timestamp: string): string => {
   if (Number.isNaN(d.getTime())) return ''
   return d.toLocaleString()
 }
-

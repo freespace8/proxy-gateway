@@ -40,4 +40,3 @@ func TestMemoryKeyCircuitLogStore_UpsertGetAndTTL(t *testing.T) {
 		t.Fatalf("GetKeyCircuitLog(expired) ok=true, want false")
 	}
 }
-

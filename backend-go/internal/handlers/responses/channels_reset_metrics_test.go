@@ -49,4 +49,3 @@ func TestResponsesChannels_UpdateUpstream_SingleKeySwapResetsMetrics(t *testing.
 		t.Fatalf("status=%q, want %q", updated.Status, "active")
 	}
 }
-

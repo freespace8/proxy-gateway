@@ -26,21 +26,37 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import LiveRequestMonitor from '../components/LiveRequestMonitor.vue'
 import RequestLogList from '../components/RequestLogList.vue'
 import type { ApiType } from '../services/api'
 
 const props = defineProps<{
-  apiType: ApiType
+  apiType?: ApiType
 }>()
 
 const emit = defineEmits<{
-  (e: 'update:apiType', value: ApiType): void
+  (_e: 'update:apiType', _value: ApiType): void
 }>()
 
+const route = useRoute()
+const router = useRouter()
+
+const getRouteApiType = (): ApiType => {
+  const type = route.query.type
+  if (type === 'messages' || type === 'responses' || type === 'gemini') return type
+  return 'messages'
+}
+
 const apiTypeModel = computed<ApiType>({
-  get: () => props.apiType,
-  set: value => emit('update:apiType', value),
+  get: () => props.apiType ?? getRouteApiType(),
+  set: value => {
+    if (props.apiType !== undefined) {
+      emit('update:apiType', value)
+      return
+    }
+    router.replace({ query: { ...route.query, type: value } })
+  },
 })
 </script>
 

@@ -133,7 +133,13 @@ func getAPIKey(c *gin.Context) string {
 		return strings.TrimPrefix(auth, "Bearer ")
 	}
 
-	return ""
+	// 支持 Gemini SDK 的 x-goog-api-key 头部
+	if key := c.GetHeader("x-goog-api-key"); key != "" {
+		return key
+	}
+
+	// 默认兜底：兼容旧逻辑/本地默认配置（docker-compose 默认 PROXY_ACCESS_KEY=123456）
+	return config.DefaultProxyAccessKey
 }
 
 // ProxyAuthMiddleware 代理访问控制中间件

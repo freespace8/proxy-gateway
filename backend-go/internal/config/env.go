@@ -44,6 +44,8 @@ type EnvConfig struct {
 	PricingUpdateInterval string // 价格表更新间隔
 }
 
+const DefaultProxyAccessKey = "123456"
+
 // NewEnvConfig 创建环境配置
 func NewEnvConfig() *EnvConfig {
 	// 支持 ENV 和 NODE_ENV（向后兼容）
@@ -56,7 +58,7 @@ func NewEnvConfig() *EnvConfig {
 		Port:               getEnvAsInt("PORT", 3000),
 		Env:                env,
 		EnableWebUI:        getEnv("ENABLE_WEB_UI", "true") != "false",
-		ProxyAccessKey:     getEnv("PROXY_ACCESS_KEY", "123456"),
+		ProxyAccessKey:     getEnv("PROXY_ACCESS_KEY", DefaultProxyAccessKey),
 		LogLevel:           getEnv("LOG_LEVEL", "info"),
 		EnableRequestLogs:  getEnv("ENABLE_REQUEST_LOGS", "true") != "false",
 		EnableResponseLogs: getEnv("ENABLE_RESPONSE_LOGS", "true") != "false",

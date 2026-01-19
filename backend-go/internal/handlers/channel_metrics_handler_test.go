@@ -225,11 +225,31 @@ func TestChannelMetricsHandlers_CoreEndpoints(t *testing.T) {
 			t.Fatalf("expected lastFailureAt/circuitBrokenAt in dashboard metrics, got=%+v", metricsArr)
 		}
 
+		recentAny, ok := payload["recentActivity"].([]any)
+		if !ok {
+			t.Fatalf("missing recentActivity: %+v", payload)
+		}
+		if len(recentAny) != 2 {
+			t.Fatalf("recentActivity len=%d, want %d", len(recentAny), 2)
+		}
+
 		w2 := httptest.NewRecorder()
 		req2 := httptest.NewRequest(http.MethodGet, "/dash?type=responses", nil)
 		r.ServeHTTP(w2, req2)
 		if w2.Code != http.StatusOK {
 			t.Fatalf("dash responses status=%d body=%s", w2.Code, w2.Body.String())
+		}
+
+		var payload2 map[string]any
+		if err := json.Unmarshal(w2.Body.Bytes(), &payload2); err != nil {
+			t.Fatalf("unmarshal responses: %v", err)
+		}
+		recent2, ok := payload2["recentActivity"].([]any)
+		if !ok {
+			t.Fatalf("missing recentActivity responses: %+v", payload2)
+		}
+		if len(recent2) != 1 {
+			t.Fatalf("recentActivity responses len=%d, want %d", len(recent2), 1)
 		}
 	}
 

@@ -165,4 +165,3 @@ func TestGeminiChannelsHandlers_EdgeCases(t *testing.T) {
 		}
 	})
 }
-

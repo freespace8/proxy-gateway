@@ -55,31 +55,31 @@
         height="420"
         @update:options="onOptionsUpdate"
       >
-        <template #item.timestamp="{ item }">
+        <template #[slotTimestamp]="{ item }">
           <span class="text-caption">{{ formatTimestamp(item.timestamp) }}</span>
         </template>
 
-        <template #item.channelName="{ item }">
+        <template #[slotChannelName]="{ item }">
           <span class="text-body-2">{{ item.channelName }}</span>
         </template>
 
-        <template #item.keyMask="{ item }">
+        <template #[slotKeyMask]="{ item }">
           <span class="text-caption font-mono">{{ item.keyMask }}</span>
         </template>
 
-        <template #item.model="{ item }">
+        <template #[slotModel]="{ item }">
           <span class="text-caption">{{ item.model || '--' }}</span>
         </template>
 
-        <template #item.reasoningEffort="{ item }">
+        <template #[slotReasoningEffort]="{ item }">
           <span class="text-caption">{{ item.reasoningEffort || '--' }}</span>
         </template>
 
-        <template #item.statusCode="{ item }">
+        <template #[slotStatusCode]="{ item }">
           <v-tooltip v-if="item.errorMessage" location="top" :open-delay="200">
-            <template #activator="{ props }">
+            <template #activator="{ props: activatorProps }">
               <v-chip
-                v-bind="props"
+                v-bind="activatorProps"
                 size="x-small"
                 :color="getStatusColor(item.statusCode)"
                 variant="tonal"
@@ -105,25 +105,25 @@
           </v-chip>
         </template>
 
-        <template #item.durationMs="{ item }">
+        <template #[slotDurationMs]="{ item }">
           <span class="text-caption">{{ formatDurationMs(item.durationMs) }}</span>
         </template>
 
-        <template #item.tokens="{ item }">
+        <template #[slotTokens]="{ item }">
           <span class="text-caption">
             {{ formatTokens(item.inputTokens, item.outputTokens) }}
           </span>
         </template>
 
-        <template #item.cacheReadTokens="{ item }">
+        <template #[slotCacheReadTokens]="{ item }">
           <span class="text-caption">{{ formatCacheTokens(item.cacheReadTokens) }}</span>
         </template>
 
-        <template #item.cacheCreationTokens="{ item }">
+        <template #[slotCacheCreationTokens]="{ item }">
           <span class="text-caption">{{ formatCacheTokens(item.cacheCreationTokens) }}</span>
         </template>
 
-        <template #item.costCents="{ item }">
+        <template #[slotCostCents]="{ item }">
           <span class="text-caption">{{ formatCost(item.costCents) }}</span>
         </template>
       </v-data-table-server>
@@ -138,6 +138,18 @@ import { api, type ApiType, type RequestLogRecord } from '../services/api'
 const props = defineProps<{
   apiType: ApiType
 }>()
+
+const slotTimestamp = 'item.timestamp'
+const slotChannelName = 'item.channelName'
+const slotKeyMask = 'item.keyMask'
+const slotModel = 'item.model'
+const slotReasoningEffort = 'item.reasoningEffort'
+const slotStatusCode = 'item.statusCode'
+const slotDurationMs = 'item.durationMs'
+const slotTokens = 'item.tokens'
+const slotCacheReadTokens = 'item.cacheReadTokens'
+const slotCacheCreationTokens = 'item.cacheCreationTokens'
+const slotCostCents = 'item.costCents'
 
 const headers = [
   { title: '时间', key: 'timestamp', width: '140px', sortable: false },

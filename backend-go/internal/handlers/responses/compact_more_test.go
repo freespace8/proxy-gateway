@@ -109,4 +109,3 @@ func TestCompactHandler_MultiChannel_AllChannelsFail_FuzzyEnabledReturns503(t *t
 		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 	}
 }
-

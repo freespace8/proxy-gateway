@@ -178,4 +178,3 @@ func TestCompactHandler_MultiChannel_NonFailoverErrorStopsWithoutFailover(t *tes
 		t.Fatalf("badCalls=%d goodCalls=%d, want 1/0", badCalls, goodCalls)
 	}
 }
-

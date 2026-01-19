@@ -4,6 +4,41 @@
 
 ---
 
+## [v2.5.1] - 2026-01-19
+
+本版本同步上游 `claude-proxy v2.5.1` 的关键变更，并保留本仓库自研能力（请求监控/请求日志、Key 元信息 enable/disable + description 等）。
+
+### ✨ 新增
+
+- **渠道 Dashboard 增加最近 15 分钟活跃度（recentActivity）** - 150 段 × 6 秒聚合，支持多 BaseURL × 多 Key 汇总
+  - 后端：新增聚合计算并在 Messages/Responses/Gemini Dashboard 返回中携带
+  - 前端：渠道编排列表增加活跃度波形背景与 RPM/TPM 展示
+
+- **Gemini Dashboard 接口** - 新增 `/api/gemini/channels/dashboard`，与 Messages/Responses 的 Dashboard 数据结构对齐
+
+### 🔧 优化
+
+- **鉴权兼容 Gemini SDK** - WebAuth 支持 `x-goog-api-key`（不影响现有 `x-api-key` / `Authorization: Bearer`）
+
+- **会话亲和增强** - `ExtractConversationID` 支持 `X-Gemini-Api-Privileged-User-Id`，提升 Gemini 会话亲和一致性
+
+- **前端架构对齐上游 v2.5.1** - 引入 Vue Router + Pinia，重构页面与状态管理，改善刷新/切换体验
+
+- **请求监控迁移为路由页面** - 新增 `/monitor` 路由入口（顶部按钮切换“请求监控 / 返回概览”）
+
+### 🐛 修复
+
+- **Gemini function call `thought_signature` 兼容** - 兼容缺失签名场景，并透传 Claude signature
+
+### 🧪 测试
+
+- 补充：鉴权头、recentActivity 聚合、Dashboard handler、Gemini converter 等单测覆盖
+
+### 🧩 仓库
+
+- **版本号更新**：`VERSION` → `v2.5.1`
+- 对齐上游：新增 `.gitattributes`，更新 `.gitignore`
+
 ## [v2.4.32] - 2026-01-14
 
 ### ✨ 新增

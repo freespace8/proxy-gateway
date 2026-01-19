@@ -124,4 +124,3 @@ func TestGeminiChannels_SetChannelStatus_OutOfRangeReturns404(t *testing.T) {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 	}
 }
-

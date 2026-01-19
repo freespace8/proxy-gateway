@@ -1,5 +1,5 @@
 <template>
-  <v-dialog :model-value="show" @update:model-value="$emit('update:show', $event)" max-width="800" persistent>
+  <v-dialog :model-value="show" max-width="800" persistent @update:model-value="$emit('update:show', $event)">
     <v-card rounded="lg">
       <v-card-title class="d-flex align-center ga-3 pa-6" :class="headerClasses">
         <v-avatar :color="avatarColor" variant="flat" size="40">
@@ -14,7 +14,7 @@
           </div>
         </div>
         <!-- 模式切换按钮（仅在添加模式显示） -->
-        <v-btn v-if="!isEditing" variant="outlined" size="small" @click="toggleMode" class="mode-toggle-btn">
+        <v-btn v-if="!isEditing" variant="outlined" size="small" class="mode-toggle-btn" @click="toggleMode">
           <v-icon start size="16">{{ isQuickMode ? 'mdi-form-textbox' : 'mdi-lightning-bolt' }}</v-icon>
           {{ isQuickMode ? '详细配置' : '快速添加' }}
         </v-btn>
@@ -50,7 +50,7 @@
                       请输入一个有效的 URL (https://...)
                     </div>
                     <div v-else class="d-flex flex-column ga-2 mt-1">
-                      <div v-for="(url, index) in detectedBaseUrls" :key="url" class="base-url-item">
+                      <div v-for="url in detectedBaseUrls" :key="url" class="base-url-item">
                         <div class="text-caption text-success">{{ url }}</div>
                         <div class="text-caption text-medium-emphasis">预期请求: {{ getExpectedRequestUrl(url) }}</div>
                       </div>
@@ -181,7 +181,7 @@
             </v-col>
 
             <!-- 模型重定向配置 -->
-            <v-col cols="12" v-if="form.serviceType">
+            <v-col v-if="form.serviceType" cols="12">
               <v-card variant="outlined" rounded="lg">
                 <v-card-title class="d-flex align-center justify-space-between pa-4 pb-2">
                   <div class="d-flex align-center ga-2">
@@ -207,7 +207,7 @@
                         variant="tonal"
                         color="surface-variant"
                       >
-                        <template v-slot:prepend>
+                        <template #prepend>
                           <v-icon size="small" color="primary">mdi-arrow-right</v-icon>
                         </template>
 
@@ -219,14 +219,14 @@
                           </div>
                         </v-list-item-title>
 
-                        <template v-slot:append>
+                        <template #append>
                           <v-btn
                             size="small"
                             color="primary"
                             icon
                             variant="text"
-                            @click="editModelMapping(source)"
                             :disabled="editingModelMappingSource === source"
+                            @click="editModelMapping(source)"
                           >
                             <v-icon size="small" color="primary">mdi-pencil</v-icon>
                           </v-btn>
@@ -264,8 +264,8 @@
                     <v-btn
                       color="secondary"
                       variant="elevated"
-                      @click="addModelMapping"
                       :disabled="!String(newMapping.source ?? '').trim() || !String(newMapping.target ?? '').trim()"
+                      @click="addModelMapping"
                     >
                       {{ editingModelMappingSource ? '保存' : '添加' }}
                     </v-btn>
@@ -309,7 +309,7 @@
                         :color="duplicateKeyIndex === index ? 'error' : 'surface-variant'"
                         :class="{ 'animate-pulse': duplicateKeyIndex === index }"
                       >
-                        <template v-slot:prepend>
+                        <template #prepend>
                           <v-icon size="small" :color="duplicateKeyIndex === index ? 'error' : 'primary'">
                             {{ duplicateKeyIndex === index ? 'mdi-alert' : 'mdi-key' }}
                           </v-icon>
@@ -328,26 +328,26 @@
                           <div class="d-flex align-center ga-3">
                             <v-switch
                               :model-value="!isAPIKeyDisabled(key)"
-                              @update:model-value="setAPIKeyEnabled(key, $event)"
                               hide-details
                               density="compact"
                               color="success"
                               class="key-meta-switch"
+                              @update:model-value="setAPIKeyEnabled(key, $event)"
                             />
                             <v-text-field
                               :model-value="getAPIKeyDescription(key)"
-                              @update:model-value="setAPIKeyDescription(key, $event)"
                               label="描述"
                               placeholder="可选"
                               variant="underlined"
                               density="compact"
                               hide-details
                               class="flex-grow-1"
+                              @update:model-value="setAPIKeyDescription(key, $event)"
                             />
                           </div>
                         </v-list-item-subtitle>
 
-                        <template v-slot:append>
+                        <template #append>
                           <div class="d-flex align-center ga-1">
                             <!-- 置顶/置底：仅首尾密钥显示 -->
                             <v-tooltip
@@ -443,20 +443,20 @@
                       variant="outlined"
                       density="comfortable"
                       type="password"
-                      @keyup.enter="addApiKey"
                       :error="!!apiKeyError"
                       :error-messages="apiKeyError"
-                      @input="handleApiKeyInput"
                       class="flex-grow-1"
+                      @keyup.enter="addApiKey"
+                      @input="handleApiKeyInput"
                     />
                     <v-btn
                       color="primary"
                       variant="elevated"
                       size="large"
                       height="40"
-                      @click="addApiKey"
                       :disabled="!newApiKey.trim()"
                       class="mt-1"
+                      @click="addApiKey"
                     >
                       添加
                     </v-btn>
@@ -492,7 +492,7 @@
                     </div>
                   </div>
                 </div>
-                <v-switch inset color="warning" hide-details v-model="form.insecureSkipVerify" />
+                <v-switch v-model="form.insecureSkipVerify" inset color="warning" hide-details />
               </div>
             </v-col>
 
@@ -508,7 +508,7 @@
                     </div>
                   </div>
                 </div>
-                <v-switch inset color="info" hide-details v-model="form.lowQuality" />
+                <v-switch v-model="form.lowQuality" inset color="info" hide-details />
               </div>
             </v-col>
           </v-row>
@@ -522,9 +522,9 @@
           v-if="!isEditing && isQuickMode"
           color="primary"
           variant="elevated"
-          @click="handleQuickSubmit"
           :disabled="!isQuickFormValid"
           prepend-icon="mdi-check"
+          @click="handleQuickSubmit"
         >
           创建渠道
         </v-btn>
@@ -532,9 +532,9 @@
           v-else
           color="primary"
           variant="elevated"
-          @click="handleSubmit"
           :disabled="!isFormValid"
           prepend-icon="mdi-check"
+          @click="handleSubmit"
         >
           {{ isEditing ? '更新渠道' : '创建渠道' }}
         </v-btn>
@@ -547,11 +547,7 @@
 import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useTheme } from 'vuetify'
 import type { Channel, APIKeyMeta } from '../services/api'
-import {
-  isValidApiKey,
-  isValidUrl as isValidQuickInputUrl,
-  parseQuickInput as parseQuickInputUtil
-} from '../utils/quickInputParser'
+import { parseQuickInput as parseQuickInputUtil } from '../utils/quickInputParser'
 
 interface Props {
   show: boolean
@@ -646,17 +642,6 @@ const getDefaultServiceTypeValue = (): 'openai' | 'gemini' | 'claude' | 'respons
   return 'claude'
 }
 
-// 获取默认 Base URL
-const getDefaultBaseUrl = (): string => {
-  if (props.channelType === 'gemini') {
-    return 'https://generativelanguage.googleapis.com'
-  }
-  if (props.channelType === 'responses') {
-    return 'https://api.openai.com/v1'
-  }
-  return 'https://api.anthropic.com'
-}
-
 // 快速模式表单验证
 const isQuickFormValid = computed(() => {
   return detectedBaseUrls.value.length > 0 && detectedApiKeys.value.length > 0
@@ -705,50 +690,6 @@ const generatedChannelName = computed(() => {
   }
   const domain = extractDomain(detectedBaseUrl.value)
   return `${domain}-${randomSuffix.value}`
-})
-
-// 预期请求 URL（模拟后端逻辑）
-const expectedRequestUrl = computed(() => {
-  if (!detectedBaseUrl.value) return ''
-
-  let baseUrl = detectedBaseUrl.value
-  const skipVersion = baseUrl.endsWith('#')
-  if (skipVersion) {
-    baseUrl = baseUrl.slice(0, -1)
-  }
-
-  // 检查是否已包含版本号
-  const hasVersion = /\/v\d+[a-z]*$/.test(baseUrl)
-
-  // 根据渠道类型和服务类型确定端点（与后端逻辑一致）
-  const serviceType = detectedServiceType.value || getDefaultServiceTypeValue()
-  let endpoint = ''
-  if (props.channelType === 'responses') {
-    // responses 渠道根据 serviceType 决定端点
-    if (serviceType === 'responses') {
-      endpoint = '/responses'
-    } else if (serviceType === 'claude') {
-      endpoint = '/messages'
-    } else {
-      endpoint = '/chat/completions'
-    }
-  } else {
-    // messages 渠道：根据检测到的服务类型决定端点
-    if (serviceType === 'claude') {
-      endpoint = '/messages'
-    } else if (serviceType === 'gemini') {
-      endpoint = '/models/{model}:generateContent'
-    } else {
-      endpoint = '/chat/completions'
-    }
-  }
-
-  if (hasVersion || skipVersion) {
-    return baseUrl + endpoint
-  }
-  // Gemini 使用 /v1beta，其他使用 /v1
-  const versionPrefix = serviceType === 'gemini' ? '/v1beta' : '/v1'
-  return baseUrl + versionPrefix + endpoint
 })
 
 // 生成单个 URL 的预期请求地址

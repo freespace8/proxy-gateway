@@ -19,7 +19,7 @@
           <v-btn value="today" size="x-small">今日</v-btn>
         </v-btn-toggle>
 
-        <v-btn icon size="x-small" variant="text" @click="refreshData" :loading="isLoading" :disabled="isLoading">
+        <v-btn icon size="x-small" variant="text" :loading="isLoading" :disabled="isLoading" @click="refreshData">
           <v-icon size="small">mdi-refresh</v-icon>
         </v-btn>
       </div>
@@ -307,12 +307,6 @@ const failureAnnotations = computed(() => {
   return annotations
 })
 
-// Computed: get all data points flattened
-const allDataPoints = computed(() => {
-  if (!historyData.value?.keys) return []
-  return historyData.value.keys.flatMap(k => k.dataPoints || [])
-})
-
 // Computed: chart options
 const chartOptions = computed<ApexOptions>(() => {
   const mode = selectedView.value
@@ -437,7 +431,7 @@ const buildChartSeries = (data: ChannelKeyMetricsHistoryResponse | null) => {
   const mode = selectedView.value
   const result: { name: string; data: { x: number; y: number }[] }[] = []
 
-  data.keys.forEach((keyData, keyIndex) => {
+  data.keys.forEach((keyData) => {
     if (mode === 'traffic') {
       // 单向模式：只显示请求数
       result.push({
@@ -547,7 +541,7 @@ const formatTooltipValue = (val: number, mode: ViewMode): string => {
 }
 
 // Helper: build custom tooltip for traffic mode (shows success/failure breakdown)
-const buildTrafficTooltip = ({ series, seriesIndex, dataPointIndex, w }: any): string => {
+const buildTrafficTooltip = ({ seriesIndex, dataPointIndex, w }: any): string => {
   if (!historyData.value?.keys) return ''
 
   const timestamp = w.globals.seriesX[seriesIndex][dataPointIndex]
@@ -645,22 +639,6 @@ const buildTrafficTooltip = ({ series, seriesIndex, dataPointIndex, w }: any): s
 
   html += `</div>`
   return html
-}
-
-// Helper: get duration in milliseconds
-const getDurationMs = (duration: Duration): number => {
-  switch (duration) {
-    case '1h': return 60 * 60 * 1000
-    case '6h': return 6 * 60 * 60 * 1000
-    case '24h': return 24 * 60 * 60 * 1000
-    case 'today': {
-      // 计算从今日 0 点到现在的毫秒数
-      const now = new Date()
-      const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-      return now.getTime() - startOfDay.getTime()
-    }
-    default: return 6 * 60 * 60 * 1000
-  }
 }
 
 // Helper: get dash array for stroke style

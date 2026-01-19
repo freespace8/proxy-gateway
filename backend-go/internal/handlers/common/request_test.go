@@ -185,14 +185,21 @@ func TestExtractUserIDAndConversationID(t *testing.T) {
 
 	c3, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c3.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-	if got := ExtractConversationID(c3, body); got != "pc" {
+	c3.Request.Header.Set("X-Gemini-Api-Privileged-User-Id", "g1")
+	if got := ExtractConversationID(c3, body); got != "g1" {
+		t.Fatalf("gemini privileged user id = %q", got)
+	}
+
+	c4, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c4.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	if got := ExtractConversationID(c4, body); got != "pc" {
 		t.Fatalf("prompt_cache_key = %q", got)
 	}
 
 	body2 := []byte(`{"metadata":{"user_id":"u2"}}`)
-	c4, _ := gin.CreateTestContext(httptest.NewRecorder())
-	c4.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-	if got := ExtractConversationID(c4, body2); got != "u2" {
+	c5, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c5.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	if got := ExtractConversationID(c5, body2); got != "u2" {
 		t.Fatalf("metadata.user_id = %q", got)
 	}
 }

@@ -1,4 +1,17 @@
 // API服务模块
+import { useAuthStore } from '@/stores/auth'
+
+export class ApiError extends Error {
+  readonly status: number
+  readonly details?: unknown
+
+  constructor(message: string, status: number, details?: unknown) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+    this.details = details
+  }
+}
 
 // 从环境变量读取配置
 const getApiBase = () => {
@@ -25,7 +38,7 @@ if (import.meta.env.DEV) {
 }
 
 // 渠道状态枚举
-export type ChannelStatus = 'active' | 'suspended' | 'disabled' | ''
+export type ChannelStatus = 'active' | 'suspended' | 'disabled'
 
 // 渠道指标
 // 分时段统计
@@ -90,8 +103,7 @@ export interface Channel {
   insecureSkipVerify?: boolean
   modelMapping?: Record<string, string>
   latency?: number
-  status?: ChannelStatus
-  // 仅用于“测试延迟/连通性”展示，不参与故障转移/备用池分组
+  status?: ChannelStatus | ''
   health?: 'healthy' | 'error' | 'unknown'
   index: number
   pinned?: boolean
@@ -124,6 +136,7 @@ export interface ChannelDashboardResponse {
     windowSize: number
     circuitRecoveryTime: string
   }
+  recentActivity?: ChannelRecentActivity[]  // 最近 15 分钟分段活跃度
 }
 
 export interface PingResult {
@@ -148,10 +161,6 @@ export interface MetricsHistoryResponse {
   channelName: string
   dataPoints: HistoryDataPoint[]
   warning?: string
-}
-
-export interface CircuitLogResponse {
-  log: string
 }
 
 // Key 级别历史数据点（包含 Token 数据）
@@ -220,6 +229,25 @@ export interface GlobalStatsHistoryResponse {
   warning?: string
 }
 
+// ============== 渠道实时活跃度类型 ==============
+
+// 活跃度分段数据（每 6 秒一段）
+export interface ActivitySegment {
+  requestCount: number
+  successCount: number
+  failureCount: number
+  inputTokens: number
+  outputTokens: number
+}
+
+// 渠道最近活跃度数据
+export interface ChannelRecentActivity {
+  channelIndex: number
+  segments: ActivitySegment[]  // 150 段，每段 6 秒，从旧到新（共 15 分钟）
+  rpm: number                  // 15分钟平均 RPM
+  tpm: number                  // 15分钟平均 TPM
+}
+
 // ============== 缓存统计类型 ==============
 
 export interface CacheStats {
@@ -242,7 +270,10 @@ export interface CacheStatsResponse {
 
 export type ApiType = 'messages' | 'responses' | 'gemini'
 
-// 请求日志记录
+export interface CircuitLogResponse {
+  log: string
+}
+
 export interface RequestLogRecord {
   id: number
   requestId: string
@@ -264,7 +295,6 @@ export interface RequestLogRecord {
   apiType: string
 }
 
-// 请求日志响应
 export interface RequestLogsResponse {
   logs: RequestLogRecord[]
   total: number
@@ -272,7 +302,6 @@ export interface RequestLogsResponse {
   offset: number
 }
 
-// 实时请求
 export interface LiveRequest {
   requestId: string
   channelIndex: number
@@ -285,54 +314,40 @@ export interface LiveRequest {
   isStreaming: boolean
 }
 
-// 实时请求响应
 export interface LiveRequestsResponse {
   requests: LiveRequest[]
   count: number
 }
 
 class ApiService {
-  private apiKey: string | null = null
-  private readonly fallbackApiKey = '123456'
-
-  // 设置API密钥
-  setApiKey(key: string | null) {
-    this.apiKey = key
+  // 获取当前 API Key（从 AuthStore）
+  private getApiKey(): string | null {
+    const authStore = useAuthStore()
+    return authStore.apiKey
   }
 
-  // 获取当前API密钥
-  getApiKey(): string | null {
-    return this.apiKey
-  }
-
-  // 初始化密钥（从localStorage）
-  initializeAuth() {
-    // 从localStorage获取保存的密钥
-    const savedKey = localStorage.getItem('proxyAccessKey')
-    if (savedKey) {
-      this.setApiKey(savedKey)
-      return savedKey
+  private async parseResponseBody(response: Response): Promise<unknown> {
+    const text = await response.text()
+    if (!text) return null
+    try {
+      return JSON.parse(text)
+    } catch {
+      return text
     }
-
-    // 兜底：即使用户未输入，也至少带默认密钥，避免页面请求被 401 打断
-    this.setApiKey(this.fallbackApiKey)
-    return this.fallbackApiKey
   }
 
-  // 清除认证信息
-  clearAuth() {
-    this.apiKey = null
-    localStorage.removeItem('proxyAccessKey')
-  }
-
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async request(url: string, options: RequestInit = {}): Promise<any> {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       ...(options.headers as Record<string, string>)
     }
 
-    // 添加API密钥到请求头（始终兜底一个默认值）
-    headers['x-api-key'] = this.apiKey || this.fallbackApiKey
+    // 从 AuthStore 获取 API 密钥并添加到请求头
+    const apiKey = this.getApiKey()
+    if (apiKey) {
+      headers['x-api-key'] = apiKey
+    }
 
     const response = await fetch(`${API_BASE}${url}`, {
       ...options,
@@ -340,20 +355,32 @@ class ApiService {
     })
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: 'Unknown error' }))
+      const errorBody = await this.parseResponseBody(response)
+      const errorMessage =
+        (typeof errorBody === 'object' && errorBody && 'error' in errorBody && typeof (errorBody as { error?: unknown }).error === 'string'
+          ? (errorBody as { error: string }).error
+          : typeof errorBody === 'object' && errorBody && 'message' in errorBody && typeof (errorBody as { message?: unknown }).message === 'string'
+            ? (errorBody as { message: string }).message
+            : typeof errorBody === 'string'
+              ? errorBody
+              : null) || `Request failed (${response.status})`
 
-      // 如果是401错误，清除本地认证信息并提示用户重新登录
+      // 如果是401错误，清除认证信息并提示用户重新登录
       if (response.status === 401) {
-        this.clearAuth()
+        const authStore = useAuthStore()
+        authStore.clearAuth()
         // 记录认证失败(前端日志)
-        console.warn('🔒 认证失败 - 时间:', new Date().toISOString())
-        throw new Error('认证失败，请重新输入访问密钥')
+        if (import.meta.env.DEV) {
+          console.warn('🔒 认证失败 - 时间:', new Date().toISOString())
+        }
+        throw new ApiError('认证失败，请重新输入访问密钥', response.status, errorBody)
       }
 
-      throw new Error(error.error || error.message || 'Request failed')
+      throw new ApiError(errorMessage, response.status, errorBody)
     }
 
-    return response.json()
+    if (response.status === 204) return null
+    return this.parseResponseBody(response)
   }
 
   async getChannels(): Promise<ChannelsResponse> {
@@ -478,14 +505,6 @@ class ApiService {
     })
   }
 
-  async pingResponsesChannel(id: number): Promise<PingResult> {
-    return this.request(`/responses/ping/${id}`)
-  }
-
-  async pingAllResponsesChannels(): Promise<Array<{ id: number; name: string; latency: number; status: string }>> {
-    return this.request('/responses/ping')
-  }
-
   // ============== 多渠道调度 API ==============
 
   // 重新排序渠道优先级
@@ -547,12 +566,44 @@ class ApiService {
 
   // 获取渠道仪表盘数据（合并 channels + metrics + stats）
   async getChannelDashboard(type: 'messages' | 'responses' | 'gemini' = 'messages'): Promise<ChannelDashboardResponse> {
-    // Gemini 使用降级实现：组合 getChannels + getMetrics
     if (type === 'gemini') {
       return this.getGeminiChannelDashboard()
     }
     const query = type === 'responses' ? '?type=responses' : ''
     return this.request(`/messages/channels/dashboard${query}`)
+  }
+
+  // ============== 请求日志与实时监控 API ==============
+
+  async getRequestLogs(apiType: ApiType, limit = 50, offset = 0): Promise<RequestLogsResponse> {
+    return this.request(`/${apiType}/logs?limit=${limit}&offset=${offset}`)
+  }
+
+  async getLiveRequests(apiType: ApiType): Promise<LiveRequestsResponse> {
+    return this.request(`/${apiType}/live`)
+  }
+
+  async getKeyCircuitLog(apiType: ApiType, channelId: number, keyIndex: number): Promise<CircuitLogResponse> {
+    return this.request(`/${apiType}/channels/${channelId}/keys/index/${keyIndex}/circuit-log`)
+  }
+
+  async resetKeyCircuit(apiType: ApiType, channelId: number, keyIndex: number): Promise<void> {
+    await this.request(`/${apiType}/channels/${channelId}/keys/index/${keyIndex}/reset`, {
+      method: 'POST'
+    })
+  }
+
+  async resetKeyStatus(apiType: ApiType, channelId: number, keyIndex: number): Promise<void> {
+    await this.request(`/${apiType}/channels/${channelId}/keys/index/${keyIndex}/reset-state`, {
+      method: 'POST'
+    })
+  }
+
+  async setAPIKeyDisabled(apiType: ApiType, channelId: number, keyIndex: number, disabled: boolean): Promise<void> {
+    await this.request(`/${apiType}/channels/${channelId}/keys/index/${keyIndex}/meta`, {
+      method: 'PATCH',
+      body: JSON.stringify({ disabled })
+    })
   }
 
   // ============== Responses 多渠道调度 API ==============
@@ -621,24 +672,24 @@ class ApiService {
   // ============== 历史指标 API ==============
 
   // 获取 Messages 渠道历史指标（用于时间序列图表）
-  async getChannelMetricsHistory(duration: '1h' | '6h' | '24h' | '7d' | '30d' = '24h'): Promise<MetricsHistoryResponse[]> {
+  async getChannelMetricsHistory(duration: '1h' | '6h' | '24h' = '24h'): Promise<MetricsHistoryResponse[]> {
     return this.request(`/messages/channels/metrics/history?duration=${duration}`)
   }
 
   // 获取 Responses 渠道历史指标
-  async getResponsesChannelMetricsHistory(duration: '1h' | '6h' | '24h' | '7d' | '30d' = '24h'): Promise<MetricsHistoryResponse[]> {
+  async getResponsesChannelMetricsHistory(duration: '1h' | '6h' | '24h' = '24h'): Promise<MetricsHistoryResponse[]> {
     return this.request(`/responses/channels/metrics/history?duration=${duration}`)
   }
 
   // ============== Key 级别历史指标 API ==============
 
   // 获取 Messages 渠道 Key 级别历史指标（用于 Key 趋势图表）
-  async getChannelKeyMetricsHistory(channelId: number, duration: '1h' | '6h' | '24h' | 'today' | '7d' | '30d' = '6h'): Promise<ChannelKeyMetricsHistoryResponse> {
+  async getChannelKeyMetricsHistory(channelId: number, duration: '1h' | '6h' | '24h' | 'today' = '6h'): Promise<ChannelKeyMetricsHistoryResponse> {
     return this.request(`/messages/channels/${channelId}/keys/metrics/history?duration=${duration}`)
   }
 
   // 获取 Responses 渠道 Key 级别历史指标
-  async getResponsesChannelKeyMetricsHistory(channelId: number, duration: '1h' | '6h' | '24h' | 'today' | '7d' | '30d' = '6h'): Promise<ChannelKeyMetricsHistoryResponse> {
+  async getResponsesChannelKeyMetricsHistory(channelId: number, duration: '1h' | '6h' | '24h' | 'today' = '6h'): Promise<ChannelKeyMetricsHistoryResponse> {
     return this.request(`/responses/channels/${channelId}/keys/metrics/history?duration=${duration}`)
   }
 
@@ -744,45 +795,6 @@ class ApiService {
     })
   }
 
-  // ============== 请求日志与实时监控 API ==============
-
-  // 获取 Key 的熔断日志（每个 key 仅保留 1 条）
-  async getKeyCircuitLog(apiType: ApiType, channelId: number, keyIndex: number): Promise<CircuitLogResponse> {
-    return this.request(`/${apiType}/channels/${channelId}/keys/index/${keyIndex}/circuit-log`)
-  }
-
-  // 重置 Key 的熔断/冷却状态
-  async resetKeyCircuitState(apiType: ApiType, channelId: number, keyIndex: number): Promise<void> {
-    await this.request(`/${apiType}/channels/${channelId}/keys/index/${keyIndex}/reset`, {
-      method: 'POST'
-    })
-  }
-
-  // 仅重置 Key 的熔断/冷却状态（不清空累计统计）
-  async resetKeyCircuitStatus(apiType: ApiType, channelId: number, keyIndex: number): Promise<void> {
-    await this.request(`/${apiType}/channels/${channelId}/keys/index/${keyIndex}/reset-state`, {
-      method: 'POST'
-    })
-  }
-
-  // 设置 Key 启用/禁用（仅影响选 Key；不影响熔断/统计）
-  async setAPIKeyDisabled(apiType: ApiType, channelId: number, keyIndex: number, disabled: boolean): Promise<void> {
-    await this.request(`/${apiType}/channels/${channelId}/keys/index/${keyIndex}/meta`, {
-      method: 'PATCH',
-      body: JSON.stringify({ disabled })
-    })
-  }
-
-  // 获取请求日志
-  async getRequestLogs(apiType: ApiType, limit = 50, offset = 0): Promise<RequestLogsResponse> {
-    return this.request(`/${apiType}/logs?limit=${limit}&offset=${offset}`)
-  }
-
-  // 获取实时请求
-  async getLiveRequests(apiType: ApiType): Promise<LiveRequestsResponse> {
-    return this.request(`/${apiType}/live`)
-  }
-
   // ============== Gemini 历史指标 API ==============
 
   // 获取 Gemini 渠道历史指标
@@ -815,31 +827,9 @@ class ApiService {
     }))
   }
 
-  // Gemini Dashboard（降级实现：组合 channels + metrics 调用）
+  // Gemini Dashboard（使用后端统一接口）
   async getGeminiChannelDashboard(): Promise<ChannelDashboardResponse> {
-    const [channelsResp, metrics] = await Promise.all([
-      this.getGeminiChannels(),
-      this.getGeminiChannelMetrics()
-    ])
-
-    const activeCount = channelsResp.channels.filter(
-      ch => ch.status === 'active' || !ch.status
-    ).length
-
-    return {
-      channels: channelsResp.channels,
-      loadBalance: channelsResp.loadBalance,
-      metrics: metrics,
-      stats: {
-        multiChannelMode: activeCount > 1,
-        activeChannelCount: channelsResp.channels.filter(ch => ch.status !== 'disabled').length,
-        traceAffinityCount: 0,
-        traceAffinityTTL: '0s',
-        failureThreshold: 3,
-        windowSize: 100,
-        circuitRecoveryTime: '30s'
-      }
-    }
+    return this.request('/gemini/channels/dashboard')
   }
 }
 
@@ -860,9 +850,7 @@ export interface HealthResponse {
  * 注意：/health 端点不需要认证，直接请求根路径
  */
 export const fetchHealth = async (): Promise<HealthResponse> => {
-  // 开发环境同样走 Vite proxy（见 vite.config.ts）
-  const baseUrl = import.meta.env.PROD ? '' : ''
-  const response = await fetch(`${baseUrl}/health`)
+  const response = await fetch('/health')
   if (!response.ok) {
     throw new Error(`Health check failed: ${response.status}`)
   }

@@ -31,4 +31,3 @@ func TestMemoryRequestLogStore_AddQuery(t *testing.T) {
 		t.Fatalf("order=%v,%v, want r3,r2", logs[0].RequestID, logs[1].RequestID)
 	}
 }
-

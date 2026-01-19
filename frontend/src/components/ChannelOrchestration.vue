@@ -1,5 +1,5 @@
 <template>
-  <v-card elevation="2" rounded="lg" class="channel-orchestration">
+  <v-card elevation="0" rounded="lg" class="channel-orchestration" variant="flat">
     <!-- 调度器统计信息 -->
     <v-card-title class="d-flex align-center justify-space-between py-3 px-0">
       <div class="d-flex align-center">
@@ -37,8 +37,8 @@
         item-key="index"
         handle=".drag-handle"
         ghost-class="ghost"
-        @change="onDragChange"
         class="channel-list"
+        @change="onDragChange"
       >
         <template #item="{ element, index }">
           <div class="channel-item-wrapper">
@@ -47,6 +47,40 @@
               :class="{ 'is-suspended': element.status === 'suspended' }"
               @click="toggleChannelStats(element.index)"
             >
+            <!-- SVG 活跃度波形柱状图背景 -->
+            <svg class="activity-chart-bg" preserveAspectRatio="none" viewBox="0 0 150 100">
+              <!-- 渐变定义（为每个柱子单独定义渐变） -->
+              <defs>
+                <linearGradient
+                  v-for="(bar, i) in getActivityBars(element.index)"
+                  :id="`gradient-${element.index}-${i}`"
+                  :key="`gradient-${element.index}-${i}`"
+                  x1="0%"
+                  y1="0%"
+                  x2="0%"
+                  y2="100%"
+                >
+                  <stop offset="0%" :stop-color="bar.color" stop-opacity="0.8" />
+                  <stop offset="100%" :stop-color="bar.color" stop-opacity="0.3" />
+                </linearGradient>
+              </defs>
+              <!-- 波形柱状图 -->
+              <g v-for="(bar, i) in getActivityBars(element.index)" :key="i">
+                <rect
+                  :x="bar.x"
+                  :y="bar.y"
+                  :width="bar.width"
+                  :height="bar.height"
+                  :fill="`url(#gradient-${element.index}-${i})`"
+                  :rx="bar.radius"
+                  :ry="bar.radius"
+                  class="activity-bar"
+                />
+              </g>
+            </svg>
+
+            <!-- Grid 内容容器 -->
+            <div class="channel-row-content">
             <!-- 拖拽手柄 -->
             <div class="drag-handle" @click.stop>
               <v-icon size="small" color="grey">mdi-drag-vertical</v-icon>
@@ -181,6 +215,20 @@
               <span v-else class="text-caption text-medium-emphasis">--</span>
             </div>
 
+            <!-- RPM/TPM 显示 -->
+            <div class="channel-rpm-tpm" @click.stop>
+              <div class="rpm-tpm-values">
+                <span class="rpm-value" :class="{ 'has-data': hasActivityData(element.index) }">{{ formatRPM(element.index) }}</span>
+                <span class="rpm-tpm-separator">/</span>
+                <span class="tpm-value" :class="{ 'has-data': hasActivityData(element.index) }">{{ formatTPM(element.index) }}</span>
+              </div>
+              <div class="rpm-tpm-labels">
+                <span>RPM</span>
+                <span>/</span>
+                <span>TPM</span>
+              </div>
+            </div>
+
             <!-- 延迟显示 -->
             <div class="channel-latency" @click.stop>
               <v-chip
@@ -210,15 +258,15 @@
                 size="x-small"
                 variant="text"
                 color="warning"
-                @click="resumeChannel(element.index)"
                 title="恢复"
+                @click="resumeChannel(element.index)"
               >
                 <v-icon size="small">mdi-refresh</v-icon>
               </v-btn>
 
               <v-menu>
-                <template #activator="{ props }">
-                  <v-btn icon size="x-small" variant="text" v-bind="props">
+                <template #activator="{ props: activatorProps }">
+                  <v-btn icon size="x-small" variant="text" v-bind="activatorProps">
                     <v-icon size="small">mdi-dots-vertical</v-icon>
                   </v-btn>
                 </template>
@@ -263,7 +311,7 @@
                     </template>
                     <v-list-item-title>移至备用池</v-list-item-title>
                   </v-list-item>
-                  <v-list-item @click="handleDeleteChannel(element)" :disabled="!canDeleteChannel(element)">
+                  <v-list-item :disabled="!canDeleteChannel(element)" @click="handleDeleteChannel(element)">
                     <template #prepend>
                       <v-icon size="small" :color="canDeleteChannel(element) ? 'error' : 'grey'">mdi-delete</v-icon>
                     </template>
@@ -277,7 +325,8 @@
                 </v-list>
               </v-menu>
             </div>
-          </div>
+          </div><!-- .channel-row-content -->
+          </div><!-- .channel-row -->
 
 	          <div class="channel-chart-wrapper">
 	              <div class="key-metrics-panel" @click.stop>
@@ -329,11 +378,11 @@
                           <div class="d-flex align-center ga-2">
                             <v-switch
                               :model-value="isAPIKeyEnabled(element, keyIndex)"
-                              @update:model-value="setAPIKeyEnabled(element, keyIndex, $event)"
                               :disabled="isAPIKeyMetaUpdating(element.index, keyIndex) || !element.apiKeys?.[keyIndex]"
                               hide-details
                               density="compact"
                               color="success"
+                              @update:model-value="setAPIKeyEnabled(element, keyIndex, $event)"
                             />
                             <span class="text-caption text-medium-emphasis">{{ isAPIKeyEnabled(element, keyIndex) ? '启用' : '禁用' }}</span>
                           </div>
@@ -446,8 +495,8 @@
             </v-btn>
 
             <v-menu>
-              <template #activator="{ props }">
-                <v-btn icon size="x-small" variant="text" v-bind="props">
+              <template #activator="{ props: activatorProps }">
+                <v-btn icon size="x-small" variant="text" v-bind="activatorProps">
                   <v-icon size="small">mdi-dots-vertical</v-icon>
                 </v-btn>
               </template>
@@ -493,7 +542,7 @@
 <script setup lang="ts">
 	import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 	import draggable from 'vuedraggable'
-	import { api, type Channel, type ChannelMetrics, type ChannelStatus, type TimeWindowStats } from '../services/api'
+	import { api, type Channel, type ChannelMetrics, type ChannelStatus, type TimeWindowStats, type ChannelRecentActivity } from '../services/api'
 	import ChannelStatusBadge from './ChannelStatusBadge.vue'
 	import KeyTrendChart from './KeyTrendChart.vue'
 	import CircuitLogModal from './CircuitLogModal.vue'
@@ -513,19 +562,22 @@ const props = defineProps<{
     windowSize: number
     circuitRecoveryTime?: string
   }
+  // 可选：从父组件传入的实时活跃度数据
+  dashboardRecentActivity?: ChannelRecentActivity[]
 }>()
 
 const emit = defineEmits<{
-  (e: 'edit', channel: Channel): void
-  (e: 'delete', channelId: number): void
-  (e: 'ping', channelId: number): void
-  (e: 'refresh'): void
-  (e: 'error', message: string): void
-  (e: 'success', message: string): void
+  (_e: 'edit', _channel: Channel): void
+  (_e: 'delete', _channelId: number): void
+  (_e: 'ping', _channelId: number): void
+  (_e: 'refresh'): void
+  (_e: 'error', _message: string): void
+  (_e: 'success', _message: string): void
 }>()
 
 // 状态
 const metrics = ref<ChannelMetrics[]>([])
+const recentActivity = ref<ChannelRecentActivity[]>([])
 const schedulerStats = ref<{
   multiChannelMode: boolean
   activeChannelCount: number
@@ -549,6 +601,10 @@ const LATENCY_VALID_DURATION = 5 * 60 * 1000
 // 用于触发响应式更新的时间戳
 const currentTime = ref(Date.now())
 let latencyCheckTimer: ReturnType<typeof setInterval> | null = null
+
+// 用于触发活跃度视图更新的时间戳（每 2 秒更新）
+const activityUpdateTick = ref(0)
+let activityUpdateTimer: ReturnType<typeof setInterval> | null = null
 
 // Key 元信息开关（启用/禁用）请求中
 const apiKeyMetaUpdating = ref<Record<string, boolean>>({})
@@ -651,7 +707,7 @@ const inactiveChannels = computed(() => {
 // 3. 有多个 active 渠道 → 多渠道模式
 const isMultiChannelMode = computed(() => {
   const activeCount = props.channels.filter(
-    ch => ch.status === 'active' || !ch.status
+    ch => ch.status === 'active' || ch.status === undefined || ch.status === ''
   ).length
   return activeCount > 1
 })
@@ -696,11 +752,16 @@ watch(() => props.dashboardStats, (newStats) => {
   }
 }, { immediate: true })
 
-	// 监听 channelType 变化 - 切换时刷新指标并收起图表
-	watch(() => props.channelType, () => {
-	  statsExpandedChannelIndex.value = null
-	  // 如果没有使用 dashboard props，则自己刷新
-	  if (!props.dashboardMetrics) {
+// 监听 recentActivity props 变化
+watch(() => props.dashboardRecentActivity, (newActivity) => {
+  recentActivity.value = newActivity ?? []
+}, { immediate: true })
+
+		// 监听 channelType 变化 - 切换时刷新指标并收起图表
+		watch(() => props.channelType, () => {
+		  statsExpandedChannelIndex.value = null
+		  // 如果没有使用 dashboard props，则自己刷新
+		  if (!props.dashboardMetrics) {
 	    refreshMetrics()
 	  }
 	})
@@ -820,6 +881,148 @@ const getWebsiteUrl = (channel: Channel): string => {
   }
 }
 
+// ============== 渠道实时活跃度相关函数 ==============
+
+// 活跃度数据 Map 缓存（避免线性查找）
+const activityMap = computed(() => {
+  const map = new Map<number, ChannelRecentActivity>()
+  for (const a of recentActivity.value) {
+    map.set(a.channelIndex, a)
+  }
+  return map
+})
+
+// 每个渠道的历史最大请求数（用于固定柱状图高度比例）
+const maxRequestsHistory = ref(new Map<number, number>())
+
+// 更新历史最大值
+watch(activityMap, (newMap) => {
+  for (const [channelIndex, activity] of newMap.entries()) {
+    if (!activity.segments || activity.segments.length === 0) continue
+
+    const currentMax = Math.max(...activity.segments.map(s => s.requestCount), 0)
+    const historicalMax = maxRequestsHistory.value.get(channelIndex) ?? 0
+
+    // 只在当前最大值更大时更新（保持历史峰值）
+    if (currentMax > historicalMax) {
+      maxRequestsHistory.value.set(channelIndex, currentMax)
+    }
+  }
+})
+
+// 获取渠道的活跃度数据
+const getChannelActivity = (channelIndex: number): ChannelRecentActivity | undefined => {
+  return activityMap.value.get(channelIndex)
+}
+
+// 缓存所有渠道的柱状图数据（避免在模板中重复计算）
+const activityBarsCache = computed(() => {
+  const cache = new Map<number, Array<{ x: number; y: number; width: number; height: number; radius: number; color: string }>>()
+
+  // 使用 activityUpdateTick 触发响应式更新
+  const _ = activityUpdateTick.value
+
+  for (const [channelIndex, activity] of activityMap.value.entries()) {
+    if (!activity || !activity.segments || activity.segments.length === 0) {
+      cache.set(channelIndex, [])
+      continue
+    }
+
+    const segments = activity.segments
+    const numSegments = segments.length // 150（后端已聚合为每 6 秒一段）
+
+    // 每个段一个柱子
+    const barWidth = 150 / numSegments
+    const barGap = barWidth * 0.2 // 20% 间隙
+    const actualBarWidth = barWidth - barGap
+
+    // 使用历史最大值作为归一化基准（避免高流量段离开后柱子突然变高）
+    const maxRequests = maxRequestsHistory.value.get(channelIndex) ?? Math.max(...segments.map(s => s.requestCount), 1)
+
+    const bars: Array<{ x: number; y: number; width: number; height: number; radius: number; color: string }> = []
+
+    for (let i = 0; i < numSegments; i++) {
+      const segment = segments[i]
+      const requests = segment.requestCount
+
+      // 计算柱子高度（最小高度 2，避免完全消失）
+      const heightPercent = requests / maxRequests
+      const height = Math.max(heightPercent * 85, requests > 0 ? 2 : 0)
+      const y = 100 - height
+
+      // 根据该 6 秒段的成功率计算颜色（7 档分级：极端档位 + 整数档位）
+      let color = 'rgb(74, 222, 128)' // 默认绿色（无请求或 100% 成功）
+
+      if (requests > 0) {
+        const successCount = requests - segment.failureCount
+        const successRate = (successCount / requests) * 100
+
+        if (successRate < 5) {
+          color = 'rgb(220, 38, 38)' // 0-5%：深红色（极端故障）
+        } else if (successRate < 20) {
+          color = 'rgb(239, 68, 68)' // 5-20%：红色（严重失败）
+        } else if (successRate < 40) {
+          color = 'rgb(249, 115, 22)' // 20-40%：深橙色（高失败率）
+        } else if (successRate < 60) {
+          color = 'rgb(251, 146, 60)' // 40-60%：橙色（中等失败率）
+        } else if (successRate < 80) {
+          color = 'rgb(250, 204, 21)' // 60-80%：黄色（轻微失败）
+        } else if (successRate < 95) {
+          color = 'rgb(132, 204, 22)' // 80-95%：黄绿色（良好）
+        } else {
+          color = 'rgb(74, 222, 128)' // 95-100%：绿色（优秀）
+        }
+      }
+
+      const x = i * barWidth + barGap / 2
+      const radius = actualBarWidth * 0.4
+
+      bars.push({
+        x,
+        y,
+        width: actualBarWidth,
+        height,
+        radius,
+        color
+      })
+    }
+
+    cache.set(channelIndex, bars)
+  }
+
+  return cache
+})
+
+const getActivityBars = (channelIndex: number): Array<{ x: number; y: number; width: number; height: number; radius: number; color: string }> => {
+  return activityBarsCache.value.get(channelIndex) ?? []
+}
+
+const hasActivityData = (channelIndex: number): boolean => {
+  const activity = getChannelActivity(channelIndex)
+  return !!activity && !!activity.segments && activity.segments.some(s => s.requestCount > 0)
+}
+
+const getActivityTotals = (channelIndex: number): { rpm: number; tpm: number } => {
+  const activity = getChannelActivity(channelIndex)
+  if (!activity) return { rpm: 0, tpm: 0 }
+  return { rpm: activity.rpm ?? 0, tpm: activity.tpm ?? 0 }
+}
+
+const formatRPM = (channelIndex: number): string => {
+  const { rpm } = getActivityTotals(channelIndex)
+  if (!rpm || rpm <= 0) return '--'
+  if (rpm >= 1000) return `${(rpm / 1000).toFixed(1)}k`
+  return Math.round(rpm).toString()
+}
+
+const formatTPM = (channelIndex: number): string => {
+  const { tpm } = getActivityTotals(channelIndex)
+  if (!tpm || tpm <= 0) return '--'
+  if (tpm >= 1000000) return `${(tpm / 1000000).toFixed(1)}M`
+  if (tpm >= 1000) return `${(tpm / 1000).toFixed(1)}K`
+  return Math.round(tpm).toString()
+}
+
 // 刷新指标
 const refreshMetrics = async () => {
   isLoadingMetrics.value = true
@@ -861,7 +1064,7 @@ const openCircuitLog = async (channelId: number, keyIndex: number, keyMask: stri
 	const resetKeyCircuit = async (channelId: number, keyIndex: number, keyMask: string) => {
 	  if (!confirm(`确认重置 ${keyMask} 的统计数据？此操作会清空该 Key 的请求/成功/失败等累计统计。`)) return
 	  try {
-	    await api.resetKeyCircuitState(props.channelType, channelId, keyIndex)
+	    await api.resetKeyCircuit(props.channelType, channelId, keyIndex)
 	    emit('success', `已重置 ${keyMask}`)
 	    await refreshMetrics()
 	  } catch (e: any) {
@@ -872,7 +1075,7 @@ const openCircuitLog = async (channelId: number, keyIndex: number, keyMask: stri
 	const resetKeyStatus = async (channelId: number, keyIndex: number, keyMask: string) => {
 	  if (!confirm(`确认重置 ${keyMask} 的状态？此操作会清除熔断/冷却状态，但保留累计统计。`)) return
 	  try {
-	    await api.resetKeyCircuitStatus(props.channelType, channelId, keyIndex)
+	    await api.resetKeyStatus(props.channelType, channelId, keyIndex)
 	    emit('success', `已重置状态 ${keyMask}`)
 	    await refreshMetrics()
 	  } catch (e: any) {
@@ -988,11 +1191,11 @@ const setPromotion = async (channel: Channel) => {
 const canDeleteChannel = (channel: Channel): boolean => {
   // 统计当前 active 状态的渠道数量
   const activeCount = activeChannels.value.filter(
-    ch => ch.status === 'active' || !ch.status
+    ch => ch.status === 'active' || ch.status === undefined || ch.status === ''
   ).length
 
   // 如果要删除的是 active 渠道，且只剩一个 active，则不允许删除
-  const isActive = channel.status === 'active' || !channel.status
+  const isActive = channel.status === 'active' || channel.status === undefined || channel.status === ''
   if (isActive && activeCount <= 1) {
     return false
   }
@@ -1011,11 +1214,17 @@ const handleDeleteChannel = (channel: Channel) => {
 
 // 组件挂载时加载指标并启动延迟过期检查定时器
 onMounted(() => {
-  refreshMetrics()
+  if (!props.dashboardMetrics) {
+    refreshMetrics()
+  }
   // 每 30 秒更新一次 currentTime，触发延迟显示的响应式更新
   latencyCheckTimer = setInterval(() => {
     currentTime.value = Date.now()
   }, 30000)
+  // 每 2 秒更新一次 activityUpdateTick，触发活跃度视图更新
+  activityUpdateTimer = setInterval(() => {
+    activityUpdateTick.value++
+  }, 2000)
 })
 
 // 组件卸载时清理定时器
@@ -1023,6 +1232,10 @@ onUnmounted(() => {
   if (latencyCheckTimer) {
     clearInterval(latencyCheckTimer)
     latencyCheckTimer = null
+  }
+  if (activityUpdateTimer) {
+    clearInterval(activityUpdateTimer)
+    activityUpdateTimer = null
   }
 })
 
@@ -1056,18 +1269,42 @@ defineExpose({
 }
 
 .channel-row {
-  display: grid;
-  grid-template-columns: 36px 36px 110px 1fr 130px 70px 90px 80px;
-  align-items: center;
-  gap: 10px;
-  padding: 12px 16px;
+  position: relative;
+  padding: 10px 12px;
   margin: 2px;
   background: rgb(var(--v-theme-surface));
   border: 2px solid rgb(var(--v-theme-on-surface));
   box-shadow: 4px 4px 0 0 rgb(var(--v-theme-on-surface));
-  min-height: 56px;
+  min-height: 52px;
   transition: all 0.1s ease;
   cursor: pointer;
+  overflow: hidden;
+}
+
+/* Grid 内容容器 */
+.channel-row-content {
+  display: grid;
+  grid-template-columns: 28px 28px 90px minmax(120px, 1fr) auto 50px 50px 50px auto;
+  align-items: center;
+  gap: 6px;
+  position: relative;
+  z-index: 1;
+}
+
+/* SVG 活跃度波形柱状图背景 */
+.activity-chart-bg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* 柱状图无动画：避免数据更新时的缩小-增长抖动效果 */
+.activity-bar {
+  transition: none;
 }
 
 /* 图表展开区域 */
@@ -1096,6 +1333,25 @@ defineExpose({
   background: rgba(var(--v-theme-primary), 0.12);
   box-shadow: 6px 6px 0 0 rgba(255, 255, 255, 0.7);
   border-color: rgba(255, 255, 255, 0.7);
+}
+
+/* suspended 状态的视觉区分 */
+.channel-row.is-suspended {
+  background: rgba(var(--v-theme-warning), 0.1);
+  border-color: rgb(var(--v-theme-warning));
+  box-shadow: 4px 4px 0 0 rgb(var(--v-theme-on-surface));
+}
+.channel-row.is-suspended:hover {
+  background: rgba(var(--v-theme-warning), 0.15);
+  box-shadow: 6px 6px 0 0 rgb(var(--v-theme-on-surface));
+}
+
+.v-theme--dark .channel-row.is-suspended {
+  box-shadow: 4px 4px 0 0 rgba(255, 255, 255, 0.7);
+}
+
+.v-theme--dark .channel-row.is-suspended:hover {
+  box-shadow: 6px 6px 0 0 rgba(255, 255, 255, 0.7);
 }
 
 .channel-row.ghost {
@@ -1201,6 +1457,44 @@ defineExpose({
   min-width: 60px;
 }
 
+/* RPM/TPM 显示样式 */
+.channel-rpm-tpm {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 60px;
+  margin-left: 8px;
+}
+
+.rpm-tpm-values {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(var(--v-theme-on-surface), 0.6);
+}
+
+.rpm-tpm-values .rpm-value.has-data,
+.rpm-tpm-values .tpm-value.has-data {
+  color: rgb(var(--v-theme-primary));
+}
+
+.rpm-tpm-separator {
+  color: rgba(var(--v-theme-on-surface), 0.3);
+  font-weight: 400;
+}
+
+.rpm-tpm-labels {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 9px;
+  color: rgba(var(--v-theme-on-surface), 0.5);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
 .channel-keys {
   display: flex;
   align-items: center;
@@ -1222,6 +1516,7 @@ defineExpose({
   align-items: center;
   gap: 2px;
   justify-content: flex-end;
+  min-width: 50px;
 }
 
 /* 备用资源池样式 */
@@ -1310,25 +1605,58 @@ defineExpose({
 }
 
 /* 响应式调整 */
-@media (max-width: 960px) {
+@media (max-width: 1400px) {
+  .channel-row-content {
+    grid-template-columns: 28px 28px 85px minmax(100px, 1fr) auto 45px 45px 45px auto;
+    gap: 5px;
+  }
   .channel-row {
-    grid-template-columns: 32px 32px 90px 1fr 120px 60px 60px 60px;
-    padding: 10px 12px;
-    gap: 6px;
+    padding: 10px 10px;
+  }
+}
+
+@media (max-width: 1200px) {
+  .channel-row-content {
+    grid-template-columns: 26px 26px 80px minmax(80px, 1fr) auto 40px 40px 40px auto;
+    gap: 4px;
+  }
+  .channel-row {
+    padding: 8px 8px;
+  }
+
+  .rpm-tpm-values {
+    font-size: 11px;
+  }
+
+  .rpm-tpm-labels {
+    font-size: 8px;
+  }
+}
+
+@media (max-width: 960px) {
+  .channel-row-content {
+    grid-template-columns: 26px 26px 75px minmax(60px, 1fr) auto 38px 38px 38px auto;
+    gap: 4px;
+  }
+  .channel-row {
+    padding: 8px 6px;
   }
 }
 
 @media (max-width: 600px) {
-  .channel-row {
+  .channel-row-content {
     grid-template-columns: 28px 1fr 60px;
-    padding: 10px;
     gap: 8px;
+  }
+  .channel-row {
+    padding: 10px;
     box-shadow: 3px 3px 0 0 rgb(var(--v-theme-on-surface));
   }
 
   .channel-metrics,
   .channel-latency,
-  .channel-keys {
+  .channel-keys,
+  .channel-rpm-tpm {
     display: none;
   }
 

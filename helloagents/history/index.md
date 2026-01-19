@@ -12,6 +12,7 @@
 | 202601071514 | key-loadbalance-even | 功能 | [-]未执行 | [2026-01/202601071514_key-loadbalance-even](2026-01/202601071514_key-loadbalance-even/) |
 | 202601141427 | cancel_not_fail_sqlite_selfheal | 修复 | [-]未执行 | [2026-01/202601141427_cancel_not_fail_sqlite_selfheal](2026-01/202601141427_cancel_not_fail_sqlite_selfheal/) |
 | 202601151101 | codex-reasoning-effort-monitor | 功能 | ✅已完成 | [2026-01/202601151101_codex-reasoning-effort-monitor](2026-01/202601151101_codex-reasoning-effort-monitor/) |
+| 202601191056 | sync_upstream_v251 | 维护 | ✅已完成 | [2026-01/202601191056_sync_upstream_v251](2026-01/202601191056_sync_upstream_v251/) |
 
 ---
 
@@ -23,3 +24,4 @@
 - [202601071514_key-loadbalance-even](2026-01/202601071514_key-loadbalance-even/) - 未执行归档
 - [202601141427_cancel_not_fail_sqlite_selfheal](2026-01/202601141427_cancel_not_fail_sqlite_selfheal/) - 未执行归档
 - [202601151101_codex-reasoning-effort-monitor](2026-01/202601151101_codex-reasoning-effort-monitor/) - 请求监控展示 Codex 思考等级（reasoning.effort）
+- [202601191056_sync_upstream_v251](2026-01/202601191056_sync_upstream_v251/) - 同步 upstream `claude-proxy` 至 `v2.5.1`

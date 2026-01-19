@@ -136,4 +136,3 @@ func TestGeminiChannels_AddUpstream_SaveErrorReturns500(t *testing.T) {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 	}
 }
-

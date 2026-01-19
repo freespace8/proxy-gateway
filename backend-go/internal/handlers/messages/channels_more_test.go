@@ -134,4 +134,3 @@ func TestMessagesRequestLogContext_UpdateLive_RecordsRequest(t *testing.T) {
 		t.Fatalf("unexpected live requests: %+v", reqs)
 	}
 }
-

@@ -88,4 +88,3 @@ func (s *MemoryKeyCircuitLogStore) cleanupLocked(now time.Time) {
 		}
 	}
 }
-

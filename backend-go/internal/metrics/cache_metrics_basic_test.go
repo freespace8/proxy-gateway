@@ -59,4 +59,3 @@ func TestCacheMetrics_SnapshotAndConcurrent(t *testing.T) {
 		t.Fatalf("concurrent Snapshot() = %+v, want each counter increased by %d", got, wantDelta)
 	}
 }
-

@@ -12,8 +12,8 @@
             size="small"
             variant="text"
             :disabled="!rawLog"
-            @click="copyToClipboard"
             title="复制"
+            @click="copyToClipboard"
           >
             <v-icon start size="small">mdi-content-copy</v-icon>
             复制

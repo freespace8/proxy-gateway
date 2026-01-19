@@ -33,4 +33,3 @@ func TestNormalizeResponsesReasoningEffort_OtherModelsUnchanged(t *testing.T) {
 		t.Fatalf("effort=%v, want %q", got, "minimal")
 	}
 }
-

@@ -232,6 +232,7 @@ func main() {
 		apiGroup.GET("/gemini/channels/metrics/history", handlers.GetGeminiChannelMetricsHistory(geminiMetricsManager, cfgManager))
 		apiGroup.GET("/gemini/channels/:id/keys/metrics/history", handlers.GetGeminiChannelKeyMetricsHistory(geminiMetricsManager, cfgManager))
 		apiGroup.GET("/gemini/global/stats/history", handlers.GetGlobalStatsHistory(geminiMetricsManager))
+		apiGroup.GET("/gemini/channels/dashboard", gemini.GetDashboard(cfgManager, channelScheduler))
 		apiGroup.GET("/gemini/ping/:id", gemini.PingChannel(cfgManager))
 		apiGroup.GET("/gemini/ping", gemini.PingAllChannels(cfgManager))
 

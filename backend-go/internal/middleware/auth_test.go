@@ -77,6 +77,18 @@ func TestWebAuthMiddleware_APIRequiresKey(t *testing.T) {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 		}
 	})
+
+	t.Run("x-goog-api-key allows access", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/channels", nil)
+		req.Header.Set("x-goog-api-key", envCfg.ProxyAccessKey)
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+		}
+	})
 }
 
 func TestWebAuthMiddleware_SPAPassesThrough(t *testing.T) {
@@ -125,4 +137,79 @@ func TestWebAuthMiddleware_AdminRequiresKey(t *testing.T) {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 		}
 	})
+
+	t.Run("x-goog-api-key allows access", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/admin/config/save", nil)
+		req.Header.Set("x-goog-api-key", envCfg.ProxyAccessKey)
+		w := httptest.NewRecorder()
+
+		router.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+		}
+	})
+}
+
+func TestWebAuthMiddleware_DefaultKeyAllowsMissingKey(t *testing.T) {
+	envCfg := &config.EnvConfig{
+		ProxyAccessKey: config.DefaultProxyAccessKey,
+		EnableWebUI:    true,
+	}
+	router := setupRouterWithAuth(envCfg)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/channels", nil)
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+}
+
+func TestProxyAuthMiddleware_DefaultKeyAllowsMissingKey(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	envCfg := &config.EnvConfig{
+		ProxyAccessKey: config.DefaultProxyAccessKey,
+	}
+
+	r := gin.New()
+	r.Use(ProxyAuthMiddleware(envCfg))
+	r.POST("/v1/messages", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	w := httptest.NewRecorder()
+
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+}
+
+func TestProxyAuthMiddleware_CustomKeyStillRequiresKey(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	envCfg := &config.EnvConfig{
+		ProxyAccessKey: "secret-key",
+	}
+
+	r := gin.New()
+	r.Use(ProxyAuthMiddleware(envCfg))
+	r.POST("/v1/messages", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	w := httptest.NewRecorder()
+
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusUnauthorized)
+	}
 }

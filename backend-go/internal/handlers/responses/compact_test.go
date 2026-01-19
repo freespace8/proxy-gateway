@@ -178,4 +178,3 @@ func TestBuildCompactURL_CoversVersionSuffix(t *testing.T) {
 	// 额外覆盖：确保 JSON 绑定分支可达（避免 go test 优化掉未引用的 json 包导入）
 	_, _ = json.Marshal(map[string]bool{"ok": true})
 }
-

@@ -262,7 +262,7 @@ func ProcessStreamEvent(
 
 	// 处理 message_start 事件：补全空 id 和检查 model 一致性
 	if IsMessageStartEvent(event) && ctx.RequestModel != "" {
-		eventToSend = PatchMessageStartEvent(eventToSend, ctx.RequestModel, envCfg.EnableResponseLogs && envCfg.ShouldLog("debug"))
+		eventToSend = PatchMessageStartEvent(eventToSend, ctx.RequestModel, envCfg.ShouldRewriteResponseModel(), envCfg.EnableResponseLogs && envCfg.ShouldLog("debug"))
 	}
 
 	if ctx.NeedTokenPatch && HasEventWithUsage(event) {
@@ -817,14 +817,14 @@ func IsMessageStartEvent(event string) bool {
 }
 
 // PatchMessageStartEvent 修补 message_start 事件中的 id 和 model 字段
-func PatchMessageStartEvent(event string, requestModel string, enableLog bool) string {
+func PatchMessageStartEvent(event string, requestModel string, rewriteModel bool, enableLog bool) string {
 	if !IsMessageStartEvent(event) {
 		return event
 	}
 
 	var result strings.Builder
 	lines := strings.Split(event, "\n")
-	patched := false
+	anyPatched := false
 
 	for _, line := range lines {
 		if !strings.HasPrefix(line, "data: ") {
@@ -832,6 +832,8 @@ func PatchMessageStartEvent(event string, requestModel string, enableLog bool) s
 			result.WriteString("\n")
 			continue
 		}
+
+		linePatched := false
 
 		jsonStr := strings.TrimPrefix(line, "data: ")
 		var data map[string]interface{}
@@ -851,28 +853,31 @@ func PatchMessageStartEvent(event string, requestModel string, enableLog bool) s
 		// 补全空 id
 		if id, _ := msg["id"].(string); id == "" {
 			msg["id"] = fmt.Sprintf("msg_%s", uuid.New().String())
-			patched = true
+			linePatched = true
 			if enableLog {
 				log.Printf("[Messages-Stream-Patch] 补全空 message.id: %s", msg["id"])
 			}
 		}
 
-		// 检查 model 一致性
-		if responseModel, _ := msg["model"].(string); responseModel != "" && requestModel != "" && responseModel != requestModel {
-			msg["model"] = requestModel
-			patched = true
-			if enableLog {
-				log.Printf("[Messages-Stream-Patch] 改写 message.model: %s -> %s", responseModel, requestModel)
+		// 检查 model 一致性（仅在配置启用时改写）
+		if rewriteModel {
+			if responseModel, _ := msg["model"].(string); responseModel != "" && requestModel != "" && responseModel != requestModel {
+				msg["model"] = requestModel
+				linePatched = true
+				if enableLog {
+					log.Printf("[Messages-Stream-Patch] 改写 message.model: %s -> %s", responseModel, requestModel)
+				}
 			}
 		}
 
-		if patched {
+		if linePatched {
 			patchedJSON, err := json.Marshal(data)
 			if err != nil {
 				result.WriteString(line)
 				result.WriteString("\n")
 				continue
 			}
+			anyPatched = true
 			result.WriteString("data: ")
 			result.Write(patchedJSON)
 			result.WriteString("\n")
@@ -882,6 +887,9 @@ func PatchMessageStartEvent(event string, requestModel string, enableLog bool) s
 		}
 	}
 
+	if !anyPatched {
+		return event
+	}
 	return result.String()
 }
 

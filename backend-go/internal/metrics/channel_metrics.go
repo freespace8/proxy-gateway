@@ -37,6 +37,8 @@ type KeyMetrics struct {
 	LastSuccessAt       *time.Time `json:"lastSuccessAt,omitempty"`
 	LastFailureAt       *time.Time `json:"lastFailureAt,omitempty"`
 	CircuitBrokenAt     *time.Time `json:"circuitBrokenAt,omitempty"` // 熔断开始时间
+	SuspendUntil        *time.Time `json:"suspendUntil,omitempty"`    // 硬熔断截止时间（例如余额不足到0点恢复）
+	SuspendReason       string     `json:"suspendReason,omitempty"`   // 硬熔断原因
 	// 滑动窗口记录（最近 N 次请求的结果）
 	recentResults []bool // true=success, false=failure
 	// 带时间戳的请求记录（用于分时段统计，按 retention 保留）
@@ -196,6 +198,11 @@ func (m *MetricsManager) RecordSuccessWithUsage(baseURL, apiKey string, usage *t
 	if metrics.CircuitBrokenAt != nil {
 		metrics.CircuitBrokenAt = nil
 		log.Printf("[Metrics-Circuit] Key [%s] (%s) 因请求成功退出熔断状态", metrics.KeyMask, metrics.BaseURL)
+	}
+	// 成功后清除硬熔断（避免“已恢复但仍不可用”的状态）
+	if metrics.SuspendUntil != nil {
+		metrics.SuspendUntil = nil
+		metrics.SuspendReason = ""
 	}
 
 	// 更新滑动窗口
@@ -756,6 +763,8 @@ func (m *MetricsManager) ResetKeyState(baseURL, apiKey string) {
 	if metrics, exists := m.keyMetrics[metricsKey]; exists {
 		metrics.ConsecutiveFailures = 0
 		metrics.CircuitBrokenAt = nil
+		metrics.SuspendUntil = nil
+		metrics.SuspendReason = ""
 	}
 }
 
@@ -800,6 +809,15 @@ func (m *MetricsManager) recoverExpiredCircuitBreakers() {
 
 	now := time.Now()
 	for _, metrics := range m.keyMetrics {
+		// 硬熔断到期自动恢复（例如余额不足到0点）
+		if metrics.SuspendUntil != nil && !now.Before(*metrics.SuspendUntil) {
+			metrics.SuspendUntil = nil
+			metrics.SuspendReason = ""
+			metrics.ConsecutiveFailures = 0
+			metrics.recentResults = make([]bool, 0, m.windowSize)
+			log.Printf("[Metrics-Circuit] Key [%s] (%s) 硬熔断自动恢复", metrics.KeyMask, metrics.BaseURL)
+		}
+
 		if metrics.CircuitBrokenAt != nil {
 			elapsed := now.Sub(*metrics.CircuitBrokenAt)
 			if elapsed > m.circuitRecoveryTime {
@@ -856,6 +874,50 @@ func (m *MetricsManager) GetCircuitRecoveryTime() time.Duration {
 // GetFailureThreshold 获取失败率阈值
 func (m *MetricsManager) GetFailureThreshold() float64 {
 	return m.failureThreshold
+}
+
+// SuspendKeyUntil 对单个 Key 进行“硬熔断”，直到指定时间自动恢复。
+// 场景：检测到“余额不足”等必然失败的上游错误，避免无意义重试与误触发 forceProbe。
+func (m *MetricsManager) SuspendKeyUntil(baseURL, apiKey string, until time.Time, reason string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	metrics := m.getOrCreateKey(baseURL, apiKey)
+	metrics.SuspendUntil = &until
+	metrics.SuspendReason = reason
+}
+
+// ShouldSuspendKeySoft 仅判断“软熔断”（失败率熔断），不包含硬熔断截止逻辑。
+func (m *MetricsManager) ShouldSuspendKeySoft(baseURL, apiKey string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	metricsKey := generateMetricsKey(baseURL, apiKey)
+	metrics, exists := m.keyMetrics[metricsKey]
+	if !exists {
+		return false
+	}
+
+	// 最小请求数保护：至少 max(3, windowSize/2) 次请求才判断
+	minRequests := max(3, m.windowSize/2)
+	if len(metrics.recentResults) < minRequests {
+		return false
+	}
+
+	return m.calculateKeyFailureRateInternal(metrics) >= m.failureThreshold
+}
+
+// IsKeyHardSuspended 判断单个 Key 是否处于硬熔断状态（未到期）。
+func (m *MetricsManager) IsKeyHardSuspended(baseURL, apiKey string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	metricsKey := generateMetricsKey(baseURL, apiKey)
+	metrics, exists := m.keyMetrics[metricsKey]
+	if !exists || metrics.SuspendUntil == nil {
+		return false
+	}
+	return time.Now().Before(*metrics.SuspendUntil)
 }
 
 // GetWindowSize 获取滑动窗口大小
@@ -1354,22 +1416,12 @@ func (m *MetricsManager) ShouldSuspend(channelIndex int) bool {
 
 // ShouldSuspendKey 判断单个 Key 是否应该熔断
 func (m *MetricsManager) ShouldSuspendKey(baseURL, apiKey string) bool {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	metricsKey := generateMetricsKey(baseURL, apiKey)
-	metrics, exists := m.keyMetrics[metricsKey]
-	if !exists {
-		return false
+	// 先判断硬熔断（例如余额不足到0点）
+	if m.IsKeyHardSuspended(baseURL, apiKey) {
+		return true
 	}
 
-	// 最小请求数保护：至少 max(3, windowSize/2) 次请求才判断
-	minRequests := max(3, m.windowSize/2)
-	if len(metrics.recentResults) < minRequests {
-		return false
-	}
-
-	return m.calculateKeyFailureRateInternal(metrics) >= m.failureThreshold
+	return m.ShouldSuspendKeySoft(baseURL, apiKey)
 }
 
 // ============ 历史数据查询方法（用于图表可视化）============

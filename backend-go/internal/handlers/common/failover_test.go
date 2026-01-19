@@ -610,6 +610,13 @@ func TestShouldRetryWithNextKey_FuzzyMode_403WithQuotaMessage(t *testing.T) {
 			wantQuota:    true,
 		},
 		{
+			name:         "403 with error string (right.codes) in fuzzy mode",
+			statusCode:   403,
+			body:         []byte(`{"error":"余额不足，请访问https://right.codes查看详情"}`),
+			wantFailover: true,
+			wantQuota:    true,
+		},
+		{
 			name:         "403 without quota keywords in fuzzy mode",
 			statusCode:   403,
 			body:         []byte(`{"error":{"message":"Access denied"}}`),

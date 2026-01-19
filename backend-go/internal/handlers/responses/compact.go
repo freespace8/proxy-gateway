@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/BenedictKing/claude-proxy/internal/config"
 	"github.com/BenedictKing/claude-proxy/internal/handlers/common"
@@ -24,6 +25,7 @@ type compactError struct {
 	status         int
 	body           []byte
 	shouldFailover bool
+	isQuotaRelated bool
 }
 
 // CompactHandler Responses API compact 端点处理器
@@ -209,7 +211,7 @@ func tryCompactChannelWithAllKeys(
 	var lastErr *compactError
 
 	// 强制探测模式
-	forceProbeMode := common.AreAllKeysSuspended(metricsManager, upstream.BaseURL, enabledKeys)
+	forceProbeMode := common.AreAllKeysSoftSuspended(metricsManager, upstream.BaseURL, enabledKeys)
 	if forceProbeMode {
 		log.Printf("[Compact-Probe] 渠道 %s 所有 Key 都被熔断，启用强制探测模式", upstream.Name)
 	}
@@ -235,6 +237,9 @@ func tryCompactChannelWithAllKeys(
 		if compactErr != nil {
 			lastErr = compactErr
 			if compactErr.shouldFailover {
+				if compactErr.isQuotaRelated && common.IsInsufficientBalanceResponse(compactErr.body) {
+					metricsManager.SuspendKeyUntil(upstream.BaseURL, apiKey, utils.NextLocalMidnight(time.Now()), "insufficient_balance")
+				}
 				failedKeys[apiKey] = true
 				cfgManager.MarkKeyAsFailed(apiKey)
 				channelScheduler.RecordFailure(upstream.BaseURL, apiKey, true)
@@ -281,8 +286,8 @@ func tryCompactWithKey(
 
 	// 判断是否需要故障转移
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		shouldFailover, _ := common.ShouldRetryWithNextKey(resp.StatusCode, respBody, cfgManager.GetFuzzyModeEnabled())
-		return false, &compactError{status: resp.StatusCode, body: respBody, shouldFailover: shouldFailover}
+		shouldFailover, isQuotaRelated := common.ShouldRetryWithNextKey(resp.StatusCode, respBody, cfgManager.GetFuzzyModeEnabled())
+		return false, &compactError{status: resp.StatusCode, body: respBody, shouldFailover: shouldFailover, isQuotaRelated: isQuotaRelated}
 	}
 
 	// 成功

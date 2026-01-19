@@ -83,7 +83,7 @@ func TestStreamHelpers_MoreBranches(t *testing.T) {
 
 	// PatchMessageStartEvent: non message_start stays unchanged
 	ev := "data: {\"type\":\"not_message_start\"}\n"
-	if got := PatchMessageStartEvent(ev, "m", false); got != ev {
+	if got := PatchMessageStartEvent(ev, "m", true, false); got != ev {
 		t.Fatalf("PatchMessageStartEvent should not change non-message_start")
 	}
 
@@ -95,12 +95,20 @@ func TestStreamHelpers_MoreBranches(t *testing.T) {
 
 func TestPatchMessageStartEvent_ParsesAndPatches(t *testing.T) {
 	ev := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"\",\"model\":\"wrong\"}}\n\n"
-	got := PatchMessageStartEvent(ev, "right", false)
+	got := PatchMessageStartEvent(ev, "right", true, false)
 	if got == ev {
 		t.Fatalf("expected patched event")
 	}
 	if !bytes.Contains([]byte(got), []byte("\"model\":\"right\"")) {
 		t.Fatalf("expected patched model, got: %s", got)
+	}
+}
+
+func TestPatchMessageStartEvent_RewriteModelDisabled(t *testing.T) {
+	ev := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_x\",\"model\":\"wrong\"}}\n\n"
+	got := PatchMessageStartEvent(ev, "right", false, false)
+	if got != ev {
+		t.Fatalf("expected event unchanged when rewrite disabled, got: %s", got)
 	}
 }
 
@@ -163,13 +171,13 @@ func TestPatchTokensInEvent_PatchesMessageUsage(t *testing.T) {
 
 func TestPatchMessageStartEvent_InvalidJSONOrMissingMessage(t *testing.T) {
 	evBadJSON := "event: message_start\ndata: {bad}\n\n"
-	gotBad := PatchMessageStartEvent(evBadJSON, "m", false)
+	gotBad := PatchMessageStartEvent(evBadJSON, "m", true, false)
 	if !strings.Contains(gotBad, "data: {bad}") {
 		t.Fatalf("unexpected=%s", gotBad)
 	}
 
 	evMissingMsg := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":\"not-object\"}\n\n"
-	got := PatchMessageStartEvent(evMissingMsg, "m", false)
+	got := PatchMessageStartEvent(evMissingMsg, "m", true, false)
 	if strings.Contains(got, "\"id\":\"msg_") {
 		t.Fatalf("expected no id patch, got=%s", got)
 	}

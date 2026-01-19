@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/BenedictKing/claude-proxy/internal/config"
 	"github.com/BenedictKing/claude-proxy/internal/metrics"
@@ -157,6 +158,33 @@ func TestAreAllKeysSuspended(t *testing.T) {
 	}
 	if AreAllKeysSuspended(m2, baseURL, keys) {
 		t.Fatalf("expected false when one key is not suspended")
+	}
+}
+
+func TestAreAllKeysSoftSuspended_IgnoresHardSuspend(t *testing.T) {
+	m := metrics.NewMetricsManagerWithConfig(3, 0.5)
+	defer m.Stop()
+
+	baseURL := "https://example.com"
+	keys := []string{"k1", "k2"}
+
+	// k1 进入硬熔断，k2 未进入任何熔断
+	m.SuspendKeyUntil(baseURL, "k1", time.Now().Add(1*time.Hour), "insufficient_balance")
+
+	if AreAllKeysSuspended(m, baseURL, keys) {
+		t.Fatalf("expected false: only one key hard-suspended")
+	}
+	if AreAllKeysSoftSuspended(m, baseURL, keys) {
+		t.Fatalf("expected false: hard suspend should not count as soft suspend")
+	}
+
+	// 模拟两把 key 都进入软熔断
+	for i := 0; i < 3; i++ {
+		m.RecordFailure(baseURL, "k1")
+		m.RecordFailure(baseURL, "k2")
+	}
+	if !AreAllKeysSoftSuspended(m, baseURL, keys) {
+		t.Fatalf("expected all keys soft suspended")
 	}
 }
 

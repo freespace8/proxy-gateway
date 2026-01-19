@@ -160,6 +160,15 @@ func classifyByErrorMessage(bodyBytes []byte) (bool, bool) {
 		return false, false
 	}
 
+	// 兼容 error 为 string 的情况：{"error":"余额不足..."}
+	if errStr, ok := errResp["error"].(string); ok {
+		log.Printf("[Failover-Debug] error为字符串: %s", errStr)
+		if failover, quota := classifyMessage(errStr); failover {
+			return true, quota
+		}
+		return false, false
+	}
+
 	errObj, ok := errResp["error"].(map[string]interface{})
 	if !ok {
 		log.Printf("[Failover-Debug] 未找到error对象, keys=%v", getMapKeys(errResp))
@@ -252,6 +261,54 @@ func classifyMessage(msg string) (bool, bool) {
 	}
 
 	return false, false
+}
+
+// IsInsufficientBalanceResponse 判断响应体是否表示“余额不足/insufficient balance”。
+// 用于触发“硬熔断到0点”，避免无意义重试。
+func IsInsufficientBalanceResponse(bodyBytes []byte) bool {
+	if len(bodyBytes) == 0 {
+		return false
+	}
+	var resp map[string]interface{}
+	if err := json.Unmarshal(bodyBytes, &resp); err != nil {
+		return false
+	}
+
+	// 支持 {"error":"余额不足..."}
+	if errStr, ok := resp["error"].(string); ok {
+		return isInsufficientBalanceMessage(errStr)
+	}
+
+	errObj, ok := resp["error"].(map[string]interface{})
+	if !ok {
+		return false
+	}
+
+	for _, field := range []string{"message", "upstream_error", "detail"} {
+		if msg, ok := errObj[field].(string); ok && isInsufficientBalanceMessage(msg) {
+			return true
+		}
+	}
+
+	if upstreamErr, ok := errObj["upstream_error"].(map[string]interface{}); ok {
+		if msg, ok := upstreamErr["message"].(string); ok && isInsufficientBalanceMessage(msg) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func isInsufficientBalanceMessage(msg string) bool {
+	m := strings.ToLower(msg)
+	if strings.Contains(m, "余额不足") {
+		return true
+	}
+	// 英文常见表达
+	if strings.Contains(m, "insufficient") && strings.Contains(m, "balance") {
+		return true
+	}
+	return false
 }
 
 // classifyErrorType 基于错误类型分类

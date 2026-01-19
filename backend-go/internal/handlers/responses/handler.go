@@ -437,7 +437,7 @@ func tryChannelWithAllKeys(
 	deprioritizeCandidates := make(map[string]bool)
 
 	// 强制探测模式
-	forceProbeMode := common.AreAllKeysSuspended(metricsManager, upstream.BaseURL, enabledKeys)
+	forceProbeMode := common.AreAllKeysSoftSuspended(metricsManager, upstream.BaseURL, enabledKeys)
 	if forceProbeMode {
 		log.Printf("[Responses-ForceProbe] 渠道 %s 所有 Key 都被熔断，启用强制探测模式", upstream.Name)
 	}
@@ -540,6 +540,10 @@ func tryChannelWithAllKeys(
 
 				shouldFailover, isQuotaRelated := common.ShouldRetryWithNextKey(resp.StatusCode, respBodyBytes, cfgManager.GetFuzzyModeEnabled())
 				if shouldFailover {
+					// 余额不足：硬熔断到本地时区 0 点自动恢复（避免无意义探测/重试）
+					if isQuotaRelated && common.IsInsufficientBalanceResponse(respBodyBytes) {
+						metricsManager.SuspendKeyUntil(currentBaseURL, apiKey, utils.NextLocalMidnight(time.Now()), "insufficient_balance")
+					}
 					failedKeys[apiKey] = true
 					cfgManager.MarkKeyAsFailed(apiKey)
 					common.RecordFailureAndStoreLastFailureLog(circuitLogStore, metricsManager, "responses", currentBaseURL, apiKey, resp.StatusCode, respBodyBytes, fmt.Errorf("上游错误: %d", resp.StatusCode), func() {
@@ -668,7 +672,7 @@ func handleSingleChannel(
 	deprioritizeCandidates := make(map[string]bool)
 
 	// 强制探测模式：检查首个 BaseURL 的所有 Key 是否都被熔断
-	forceProbeMode := common.AreAllKeysSuspended(metricsManager, baseURLs[0], enabledKeys)
+	forceProbeMode := common.AreAllKeysSoftSuspended(metricsManager, baseURLs[0], enabledKeys)
 	if forceProbeMode {
 		log.Printf("[Responses-ForceProbe] 渠道 %s 所有 Key 都被熔断，启用强制探测模式", upstream.Name)
 	}

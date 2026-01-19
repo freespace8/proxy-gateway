@@ -165,6 +165,21 @@ func AreAllKeysSuspended(metricsManager *metrics.MetricsManager, baseURL string,
 	return true
 }
 
+// AreAllKeysSoftSuspended 检查是否所有 Key 都处于“软熔断”（失败率熔断）。
+// 注意：硬熔断（例如余额不足到0点）不应触发强制探测模式，因为探测无法改变结果，只会放大无意义请求。
+func AreAllKeysSoftSuspended(metricsManager *metrics.MetricsManager, baseURL string, apiKeys []string) bool {
+	if len(apiKeys) == 0 {
+		return false
+	}
+
+	for _, apiKey := range apiKeys {
+		if !metricsManager.ShouldSuspendKeySoft(baseURL, apiKey) {
+			return false
+		}
+	}
+	return true
+}
+
 // RemoveEmptySignatures 移除请求体中 messages[*].content[*].signature 的空值
 // 用于预防 Claude API 返回 400 错误
 // 仅处理已知路径：messages 数组中各消息的 content 数组中的 signature 字段

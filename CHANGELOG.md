@@ -4,6 +4,29 @@
 
 ---
 
+## [v2.5.6] - 2026-01-20
+
+本版本选择性同步上游 `claude-proxy v2.5.6` 的 Gemini 相关关键变更，并保持本仓库自研能力（请求监控/请求日志、Key 元信息、多槽位调度等）。
+
+### ✨ 新增
+
+- **Gemini CLI 工具调用与 schema 兼容** - 兼容 `thoughtSignature`、`parametersJsonSchema` 等字段，并对工具参数 schema 做清洗以适配严格校验上游
+- **Gemini 渠道 Thought Signature 配置** - 新增 `injectDummyThoughtSignature` / `stripThoughtSignature` 两个开关（默认关闭）
+  - `injectDummyThoughtSignature`: 为缺失签名的 functionCall 注入 dummy 值，兼容要求必须有该字段的上游
+  - `stripThoughtSignature`: 移除 thoughtSignature 字段，兼容不支持该字段的旧版 Gemini API
+
+### 🐛 修复
+
+- **修复 stripThoughtSignature 无法保存/回显** - Gemini 渠道列表与 Dashboard 接口补齐字段返回
+
+### 🧪 测试
+
+- 补充：Gemini types/handler 相关单测覆盖
+
+### 🧩 仓库
+
+- **版本号更新**：`VERSION` → `v2.5.6`
+
 ## [v2.5.1] - 2026-01-19
 
 本版本同步上游 `claude-proxy v2.5.1` 的关键变更，并保留本仓库自研能力（请求监控/请求日志、Key 元信息 enable/disable + description 等）。

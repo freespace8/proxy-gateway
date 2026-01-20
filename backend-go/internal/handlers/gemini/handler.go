@@ -255,6 +255,49 @@ func extractModelName(param string) string {
 	return param
 }
 
+// ensureThoughtSignatures 确保所有 functionCall 都有 thoughtSignature 字段
+// 用于兼容 x666.me 等要求必须有该字段的第三方 API
+// 参考: https://ai.google.dev/gemini-api/docs/thought-signatures
+//
+// 行为：
+//   - 如果 functionCall 已有 thoughtSignature（非空），保留原始值
+//   - 如果 functionCall 没有 thoughtSignature（空字符串），填充 DummyThoughtSignature
+//
+// 注意：虽然官方文档说并行 FC 只有第一个需要真实 signature，
+// 但对于 dummy signature（用于跳过验证），所有 FC 都需要添加
+func ensureThoughtSignatures(geminiReq *types.GeminiRequest) {
+	for i := range geminiReq.Contents {
+		for j := range geminiReq.Contents[i].Parts {
+			part := &geminiReq.Contents[i].Parts[j]
+			if part.FunctionCall != nil && part.FunctionCall.ThoughtSignature == "" {
+				part.FunctionCall.ThoughtSignature = types.DummyThoughtSignature
+			}
+		}
+	}
+}
+
+// stripThoughtSignature 移除所有 functionCall 的 thoughtSignature 字段
+// 用于兼容旧版 Gemini API（不支持该字段）
+func stripThoughtSignature(geminiReq *types.GeminiRequest) {
+	for i := range geminiReq.Contents {
+		for j := range geminiReq.Contents[i].Parts {
+			part := &geminiReq.Contents[i].Parts[j]
+			if part.FunctionCall != nil {
+				// 使用特殊标记表示需要完全移除字段
+				part.FunctionCall.ThoughtSignature = types.StripThoughtSignatureMarker
+			}
+		}
+	}
+}
+
+// cloneGeminiRequest 深拷贝 GeminiRequest（通过 JSON 序列化/反序列化）
+func cloneGeminiRequest(req *types.GeminiRequest) *types.GeminiRequest {
+	clone := &types.GeminiRequest{}
+	data, _ := json.Marshal(req)
+	_ = json.Unmarshal(data, clone)
+	return clone
+}
+
 // handleMultiChannel 处理多槽位 Gemini 请求（(渠道,key) 扁平化）
 func handleMultiChannel(
 	c *gin.Context,
@@ -742,8 +785,21 @@ func buildProviderRequest(
 
 	switch upstream.ServiceType {
 	case "gemini":
-		// Gemini 上游：直接转发
-		requestBody, err = json.Marshal(geminiReq)
+		// Gemini 上游：根据配置处理 thoughtSignature 字段
+		reqToUse := geminiReq
+		// 优先处理 StripThoughtSignature（移除字段）
+		if upstream.StripThoughtSignature {
+			reqCopy := cloneGeminiRequest(geminiReq)
+			stripThoughtSignature(reqCopy)
+			reqToUse = reqCopy
+		} else if upstream.InjectDummyThoughtSignature {
+			// 给空签名注入 dummy 值（兼容 x666.me 等要求必须有该字段的 API）
+			reqCopy := cloneGeminiRequest(geminiReq)
+			ensureThoughtSignatures(reqCopy)
+			reqToUse = reqCopy
+		}
+
+		requestBody, err = json.Marshal(reqToUse)
 		if err != nil {
 			return nil, err
 		}
@@ -784,8 +840,19 @@ func buildProviderRequest(
 		url = fmt.Sprintf("%s/v1/chat/completions", strings.TrimRight(baseURL, "/"))
 
 	default:
-		// 默认当作 Gemini 处理
-		requestBody, err = json.Marshal(geminiReq)
+		// 默认当作 Gemini 处理，根据配置处理 thoughtSignature 字段
+		reqToUse := geminiReq
+		if upstream.StripThoughtSignature {
+			reqCopy := cloneGeminiRequest(geminiReq)
+			stripThoughtSignature(reqCopy)
+			reqToUse = reqCopy
+		} else if upstream.InjectDummyThoughtSignature {
+			reqCopy := cloneGeminiRequest(geminiReq)
+			ensureThoughtSignatures(reqCopy)
+			reqToUse = reqCopy
+		}
+
+		requestBody, err = json.Marshal(reqToUse)
 		if err != nil {
 			return nil, err
 		}

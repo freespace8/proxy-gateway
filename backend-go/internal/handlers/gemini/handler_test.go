@@ -149,6 +149,194 @@ func TestGeminiHandler_SingleChannel_Success(t *testing.T) {
 	}
 }
 
+func TestGeminiHandler_SingleChannel_InjectDummyThoughtSignature(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	var gotBody atomic.Value
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1beta/models/gemini-pro:generateContent" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		b, _ := io.ReadAll(r.Body)
+		gotBody.Store(string(b))
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+  "candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]}}],
+  "usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1,"totalTokenCount":2}
+}`))
+	}))
+	defer upstream.Close()
+
+	cfg := config.Config{
+		GeminiUpstream: []config.UpstreamConfig{
+			{
+				Name:                        "g0",
+				BaseURL:                     upstream.URL,
+				APIKeys:                     []string{"gk1"},
+				ServiceType:                 "gemini",
+				Status:                      "active",
+				Priority:                    1,
+				InjectDummyThoughtSignature: true,
+			},
+		},
+		LoadBalance:          "failover",
+		ResponsesLoadBalance: "failover",
+		GeminiLoadBalance:    "failover",
+		FuzzyModeEnabled:     true,
+	}
+
+	cfgManager, cleanupCfg := createTestConfigManager(t, cfg)
+	defer cleanupCfg()
+
+	sch, cleanupSch := createTestScheduler(t, cfgManager)
+	defer cleanupSch()
+
+	envCfg := &config.EnvConfig{
+		ProxyAccessKey:     "secret",
+		MaxRequestBodySize: 1024 * 1024,
+	}
+
+	h := NewHandler(envCfg, cfgManager, sch, nil, nil, nil)
+	r := gin.New()
+	r.POST("/v1beta/models/*modelAction", h)
+
+	// 请求缺失 thoughtSignature：应注入 dummy
+	reqBody := `{
+  "contents":[{"role":"user","parts":[{"functionCall":{"name":"list_directory","args":{"path":"."}}}]}]
+}`
+	req := httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-pro:generateContent", bytes.NewBufferString(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-api-key", envCfg.ProxyAccessKey)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	bodyStr, _ := gotBody.Load().(string)
+	if bodyStr == "" {
+		t.Fatalf("upstream body empty")
+	}
+	var got map[string]interface{}
+	if err := json.Unmarshal([]byte(bodyStr), &got); err != nil {
+		t.Fatalf("unmarshal upstream body: %v", err)
+	}
+	contents, ok := got["contents"].([]interface{})
+	if !ok || len(contents) == 0 {
+		t.Fatalf("contents=%T len=%d", got["contents"], len(contents))
+	}
+	content0, _ := contents[0].(map[string]interface{})
+	parts, ok := content0["parts"].([]interface{})
+	if !ok || len(parts) == 0 {
+		t.Fatalf("parts=%T len=%d", content0["parts"], len(parts))
+	}
+	part0, _ := parts[0].(map[string]interface{})
+	if v, ok := part0["thoughtSignature"]; !ok || v != types.DummyThoughtSignature {
+		t.Fatalf("thoughtSignature=%v, want=%v", v, types.DummyThoughtSignature)
+	}
+	if _, ok := part0["thought_signature"]; ok {
+		t.Fatalf("不应输出 thought_signature: %v", part0)
+	}
+}
+
+func TestGeminiHandler_SingleChannel_StripThoughtSignature(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	var gotBody atomic.Value
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1beta/models/gemini-pro:generateContent" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		b, _ := io.ReadAll(r.Body)
+		gotBody.Store(string(b))
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+  "candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]}}],
+  "usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1,"totalTokenCount":2}
+}`))
+	}))
+	defer upstream.Close()
+
+	cfg := config.Config{
+		GeminiUpstream: []config.UpstreamConfig{
+			{
+				Name:                  "g0",
+				BaseURL:               upstream.URL,
+				APIKeys:               []string{"gk1"},
+				ServiceType:           "gemini",
+				Status:                "active",
+				Priority:              1,
+				StripThoughtSignature: true,
+			},
+		},
+		LoadBalance:          "failover",
+		ResponsesLoadBalance: "failover",
+		GeminiLoadBalance:    "failover",
+		FuzzyModeEnabled:     true,
+	}
+
+	cfgManager, cleanupCfg := createTestConfigManager(t, cfg)
+	defer cleanupCfg()
+
+	sch, cleanupSch := createTestScheduler(t, cfgManager)
+	defer cleanupSch()
+
+	envCfg := &config.EnvConfig{
+		ProxyAccessKey:     "secret",
+		MaxRequestBodySize: 1024 * 1024,
+	}
+
+	h := NewHandler(envCfg, cfgManager, sch, nil, nil, nil)
+	r := gin.New()
+	r.POST("/v1beta/models/*modelAction", h)
+
+	// 请求包含 thoughtSignature：应被移除
+	reqBody := `{
+  "contents":[{"role":"user","parts":[{"functionCall":{"name":"list_directory","args":{"path":"."}},"thoughtSignature":"real_sig"}]}]
+}`
+	req := httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-pro:generateContent", bytes.NewBufferString(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-api-key", envCfg.ProxyAccessKey)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	bodyStr, _ := gotBody.Load().(string)
+	if bodyStr == "" {
+		t.Fatalf("upstream body empty")
+	}
+	var got map[string]interface{}
+	if err := json.Unmarshal([]byte(bodyStr), &got); err != nil {
+		t.Fatalf("unmarshal upstream body: %v", err)
+	}
+	contents, ok := got["contents"].([]interface{})
+	if !ok || len(contents) == 0 {
+		t.Fatalf("contents=%T len=%d", got["contents"], len(contents))
+	}
+	content0, _ := contents[0].(map[string]interface{})
+	parts, ok := content0["parts"].([]interface{})
+	if !ok || len(parts) == 0 {
+		t.Fatalf("parts=%T len=%d", content0["parts"], len(parts))
+	}
+	part0, _ := parts[0].(map[string]interface{})
+	if _, ok := part0["thoughtSignature"]; ok {
+		t.Fatalf("不应输出 thoughtSignature: %v", part0)
+	}
+	if _, ok := part0["thought_signature"]; ok {
+		t.Fatalf("不应输出 thought_signature: %v", part0)
+	}
+}
+
 func TestGeminiHandler_MultiChannel_FailoverToNextChannel(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

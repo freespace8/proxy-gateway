@@ -511,6 +511,38 @@
                 <v-switch v-model="form.lowQuality" inset color="info" hide-details />
               </div>
             </v-col>
+
+            <!-- 注入 Dummy Thought Signature（仅 Gemini 渠道显示） -->
+            <v-col v-if="props.channelType === 'gemini'" cols="12">
+              <div class="d-flex align-center justify-space-between">
+                <div class="d-flex align-center ga-2">
+                  <v-icon color="secondary">mdi-signature</v-icon>
+                  <div>
+                    <div class="text-body-1 font-weight-medium">注入 Dummy Thought Signature</div>
+                    <div class="text-caption text-medium-emphasis">
+                      为缺失 thoughtSignature 的 functionCall 注入 dummy 值，兼容需要该字段的第三方 API（官方 API 请关闭）
+                    </div>
+                  </div>
+                </div>
+                <v-switch v-model="form.injectDummyThoughtSignature" inset color="secondary" hide-details />
+              </div>
+            </v-col>
+
+            <!-- 移除 Thought Signature（仅 Gemini 渠道显示） -->
+            <v-col v-if="props.channelType === 'gemini'" cols="12">
+              <div class="d-flex align-center justify-space-between">
+                <div class="d-flex align-center ga-2">
+                  <v-icon color="error">mdi-close-circle</v-icon>
+                  <div>
+                    <div class="text-body-1 font-weight-medium">移除 Thought Signature</div>
+                    <div class="text-caption text-medium-emphasis">
+                      移除请求中的 thoughtSignature 字段，兼容不支持该字段的旧版 Gemini API
+                    </div>
+                  </div>
+                </div>
+                <v-switch v-model="form.stripThoughtSignature" inset color="error" hide-details />
+              </div>
+            </v-col>
           </v-row>
         </v-form>
       </v-card-text>
@@ -921,6 +953,8 @@ const form = reactive({
   website: '',
   insecureSkipVerify: false,
   lowQuality: false,
+  injectDummyThoughtSignature: false,
+  stripThoughtSignature: false,
   description: '',
   apiKeys: [] as string[],
   apiKeyMeta: {} as Record<string, APIKeyMeta>,
@@ -1119,6 +1153,8 @@ const resetForm = () => {
   form.website = ''
   form.insecureSkipVerify = false
   form.lowQuality = false
+  form.injectDummyThoughtSignature = false
+  form.stripThoughtSignature = false
   form.description = ''
   form.apiKeys = []
   form.apiKeyMeta = {}
@@ -1159,6 +1195,8 @@ const loadChannelData = (channel: Channel) => {
   form.website = channel.website || ''
   form.insecureSkipVerify = !!channel.insecureSkipVerify
   form.lowQuality = !!channel.lowQuality
+  form.injectDummyThoughtSignature = !!channel.injectDummyThoughtSignature
+  form.stripThoughtSignature = !!channel.stripThoughtSignature
   form.description = channel.description || ''
 
   // 同步 baseUrlsText（优先使用 baseUrls，否则使用 baseUrl）
@@ -1386,6 +1424,11 @@ const handleSubmit = async () => {
     apiKeys: processedApiKeys,
     apiKeyMeta,
     modelMapping: form.modelMapping
+  }
+
+  if (props.channelType === 'gemini') {
+    channelData.injectDummyThoughtSignature = form.injectDummyThoughtSignature
+    channelData.stripThoughtSignature = form.stripThoughtSignature
   }
 
   // 多 BaseURL 支持

@@ -235,3 +235,5 @@ refs/
 backend-go/cmd/
 !backend-go/cmd/stream_verify/
 docs/claude-code-investigation-*.md
+helloagents/history
+helloagents/plan

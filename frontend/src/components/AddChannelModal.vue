@@ -454,7 +454,8 @@
                       variant="elevated"
                       size="large"
                       height="40"
-                      :disabled="!newApiKey.trim()"
+                      :disabled="!newApiKey.trim() || isValidatingNewApiKey"
+                      :loading="isValidatingNewApiKey"
                       class="mt-1"
                       @click="addApiKey"
                     >
@@ -578,7 +579,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useTheme } from 'vuetify'
-import type { Channel, APIKeyMeta } from '../services/api'
+import { api, type Channel, type APIKeyMeta } from '../services/api'
 import { parseQuickInput as parseQuickInputUtil } from '../utils/quickInputParser'
 
 interface Props {
@@ -991,6 +992,7 @@ const newApiKey = ref('')
 // 密钥重复检测状态
 const apiKeyError = ref('')
 const duplicateKeyIndex = ref(-1)
+const isValidatingNewApiKey = ref(false)
 
 // 处理 API 密钥输入事件
 const handleApiKeyInput = () => {
@@ -1224,9 +1226,10 @@ const loadChannelData = (channel: Channel) => {
   formBaseUrlPreview.value = channel.baseUrl
 }
 
-const addApiKey = () => {
+const addApiKey = async () => {
   const key = newApiKey.value.trim()
   if (!key) return
+  if (isValidatingNewApiKey.value) return
 
   // 重置错误状态
   apiKeyError.value = ''
@@ -1240,6 +1243,25 @@ const addApiKey = () => {
     // 清除输入框，让用户重新输入
     newApiKey.value = ''
     return
+  }
+
+  // 仅 Codex（Responses）做真实校验：校验通过才允许添加
+  if (props.channelType === 'responses') {
+    isValidatingNewApiKey.value = true
+    try {
+      const resp = await api.validateCodexRightKey(form.baseUrl, key)
+      if (!resp?.success) {
+        const statusCode = resp?.statusCode ? String(resp.statusCode) : '未知'
+        const summary = String(resp?.upstreamError || '校验失败')
+        apiKeyError.value = `${statusCode}: ${summary}`
+        return
+      }
+    } catch (e: any) {
+      apiKeyError.value = e?.message || '校验失败'
+      return
+    } finally {
+      isValidatingNewApiKey.value = false
+    }
   }
 
   // 直接存储原始密钥

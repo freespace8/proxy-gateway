@@ -412,6 +412,17 @@
 	                          >
 	                            重置统计
 	                          </v-btn>
+                            <v-btn
+                              v-if="props.channelType === 'responses'"
+                              size="x-small"
+                              variant="text"
+                              color="primary"
+                              :loading="isValidatingKey(element.index, keyIndex)"
+                              :disabled="isValidatingKey(element.index, keyIndex) || !element.apiKeys?.[keyIndex]"
+                              @click.stop="validateKey(element.index, keyIndex, km.keyMask, element.apiKeys?.[keyIndex])"
+                            >
+                              检测
+                            </v-btn>
 	                        </div>
 	                      </td>
 	                    </tr>
@@ -611,6 +622,13 @@ const apiKeyMetaUpdating = ref<Record<string, boolean>>({})
 
 const isAPIKeyMetaUpdating = (channelId: number, keyIndex: number): boolean => {
   return apiKeyMetaUpdating.value[`${channelId}-${keyIndex}`] === true
+}
+
+// Key 校验请求中（仅 Codex/Responses）
+const validatingKey = ref<Record<string, boolean>>({})
+
+const isValidatingKey = (channelId: number, keyIndex: number): boolean => {
+  return validatingKey.value[`${channelId}-${keyIndex}`] === true
 }
 
 const getAPIKeyDescription = (channel: Channel, keyIndex: number): string => {
@@ -1082,6 +1100,40 @@ const openCircuitLog = async (channelId: number, keyIndex: number, keyMask: stri
 	    emit('error', e?.message || '重置状态失败')
 	  }
 	}
+
+const validateKey = async (channelId: number, keyIndex: number, keyMask: string, rawKey?: string) => {
+  if (props.channelType !== 'responses') return
+  if (!rawKey) {
+    emit('error', '缺少原始 Key，无法检测')
+    return
+  }
+
+  const k = `${channelId}-${keyIndex}`
+  if (validatingKey.value[k]) return
+  validatingKey.value[k] = true
+
+  try {
+    const ch = props.channels.find(c => c.index === channelId)
+    const baseUrl = ch?.baseUrl || ''
+    if (!baseUrl) {
+      emit('error', `检测失败 ${keyMask}: 缺少基础URL`)
+      return
+    }
+
+    const resp = await api.validateCodexRightKey(baseUrl, rawKey)
+    if (resp?.success) {
+      emit('success', `检测成功 ${keyMask}`)
+      return
+    }
+    const statusCode = resp?.statusCode ? String(resp.statusCode) : '未知'
+    const summary = String(resp?.upstreamError || '校验失败')
+    emit('error', `检测失败 ${keyMask}: ${statusCode} ${summary}`)
+  } catch (e: any) {
+    emit('error', `检测失败 ${keyMask}: ${e?.message || '未知错误'}`)
+  } finally {
+    validatingKey.value[k] = false
+  }
+}
 
 // 拖拽变更事件 - 自动保存顺序
 const onDragChange = () => {

@@ -148,6 +148,12 @@ export interface PingResult {
   error?: string
 }
 
+export interface ValidateCodexRightKeyResponse {
+  success: boolean
+  statusCode?: number
+  upstreamError?: string
+}
+
 // 历史数据点（用于时间序列图表）
 export interface HistoryDataPoint {
   timestamp: string
@@ -598,6 +604,13 @@ class ApiService {
   async resetKeyStatus(apiType: ApiType, channelId: number, keyIndex: number): Promise<void> {
     await this.request(`/${apiType}/channels/${channelId}/keys/index/${keyIndex}/reset-state`, {
       method: 'POST'
+    })
+  }
+
+  async validateCodexRightKey(baseUrl: string, apiKey: string): Promise<ValidateCodexRightKeyResponse> {
+    return this.request('/responses/codex/keys/validate', {
+      method: 'POST',
+      body: JSON.stringify({ baseUrl, apiKey })
     })
   }
 

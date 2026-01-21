@@ -217,6 +217,11 @@ func tryCompactChannelWithAllKeys(
 	}
 
 	for attempt := 0; attempt < len(enabledKeys); attempt++ {
+		// 请求方已取消：视为正常，停止处理（不计失败）
+		if c.Request.Context().Err() != nil {
+			return true, "", nil
+		}
+
 		apiKey, err := cfgManager.GetNextResponsesAPIKey(upstream, failedKeys)
 		if err != nil {
 			break
@@ -231,6 +236,10 @@ func tryCompactChannelWithAllKeys(
 
 		success, compactErr := tryCompactWithKey(c, upstream, apiKey, bodyBytes, envCfg, cfgManager)
 		if success {
+			// 请求方已取消：不返回 successKey，避免计入成功指标
+			if c.Request.Context().Err() != nil {
+				return true, "", nil
+			}
 			return true, apiKey, nil
 		}
 
@@ -277,6 +286,10 @@ func tryCompactWithKey(
 
 	resp, err := common.SendRequest(req, upstream, envCfg, false)
 	if err != nil {
+		// 请求方取消：视为正常，不计失败，不继续 failover
+		if common.IsClientCanceled(err) || c.Request.Context().Err() != nil {
+			return true, nil
+		}
 		return false, &compactError{status: 502, body: []byte(`{"error":"上游请求失败"}`), shouldFailover: true}
 	}
 	defer resp.Body.Close()

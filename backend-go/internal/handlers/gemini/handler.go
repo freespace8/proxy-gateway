@@ -346,7 +346,7 @@ func handleMultiChannel(
 
 		upstreamOneKey := upstream.Clone()
 		upstreamOneKey.APIKeys = []string{selection.APIKey}
-		success, successKey, successBaseURLIdx, failoverErr, usage := tryChannelWithAllKeys(
+		success, successKey, _, failoverErr, usage := tryChannelWithAllKeys(
 			c, envCfg, cfgManager, channelScheduler, circuitLogStore, upstreamOneKey, channelIndex,
 			bodyBytes, geminiReq, model, isStream, startTime,
 			reqCtx,
@@ -365,7 +365,6 @@ func handleMultiChannel(
 					reqCtx.errorMsg = ""
 					reqCtx.updateLive()
 				}
-				channelScheduler.RecordGeminiSuccessWithUsage(upstreamOneKey.GetAllBaseURLs()[successBaseURLIdx], successKey, usage, model, 0)
 			}
 			channelScheduler.SetTraceAffinitySlot(userID, channelIndex, selection.KeyIndex)
 			return

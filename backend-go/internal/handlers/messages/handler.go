@@ -299,15 +299,12 @@ func handleMultiChannel(
 
 		upstreamOneKey := upstream.Clone()
 		upstreamOneKey.APIKeys = []string{selection.APIKey}
-		success, successKey, successBaseURLIdx, failoverErr := tryChannelWithAllKeys(c, envCfg, cfgManager, channelScheduler, circuitLogStore, upstreamOneKey, channelIndex, bodyBytes, claudeReq, startTime, billingHandler, billingCtx, reqCtx)
+		success, successKey, _, failoverErr := tryChannelWithAllKeys(c, envCfg, cfgManager, channelScheduler, circuitLogStore, upstreamOneKey, channelIndex, bodyBytes, claudeReq, startTime, billingHandler, billingCtx, reqCtx)
 
 		if success {
 			// successKey 为空表示请求方取消导致的提前退出：不记录成功/亲和，也不再继续。
 			if successKey == "" {
 				return
-			}
-			if successKey != "" {
-				channelScheduler.RecordSuccess(upstreamOneKey.GetAllBaseURLs()[successBaseURLIdx], successKey, false)
 			}
 			channelScheduler.SetTraceAffinitySlot(userID, channelIndex, selection.KeyIndex)
 			return

@@ -139,6 +139,14 @@ func ProcessStreamEvents(
 	model string,
 ) error {
 	handleStreamErr := func(err error) error {
+		// 请求方取消：不计失败，不回写错误事件
+		if IsClientCanceled(err) || c.Request.Context().Err() != nil {
+			if envCfg.ShouldLog("info") {
+				log.Printf("[Messages-Stream] 请求已取消（不计失败）: %v", err)
+			}
+			return nil
+		}
+
 		log.Printf("[Messages-Stream] 错误: 流式传输错误: %v", err)
 		logPartialResponse(ctx, envCfg)
 

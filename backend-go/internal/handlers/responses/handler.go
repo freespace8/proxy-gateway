@@ -349,7 +349,7 @@ func handleMultiChannel(
 
 		upstreamOneKey := upstream.Clone()
 		upstreamOneKey.APIKeys = []string{selection.APIKey}
-		success, successKey, successBaseURLIdx, failoverErr, usage := tryChannelWithAllKeys(c, envCfg, cfgManager, channelScheduler, circuitLogStore, sessionManager, upstreamOneKey, channelIndex, bodyBytes, responsesReq, startTime, billingHandler, billingCtx, reqCtx)
+		success, successKey, _, failoverErr, usage := tryChannelWithAllKeys(c, envCfg, cfgManager, channelScheduler, circuitLogStore, sessionManager, upstreamOneKey, channelIndex, bodyBytes, responsesReq, startTime, billingHandler, billingCtx, reqCtx)
 
 		if success {
 			// successKey 为空表示请求方取消导致的提前退出：不记录成功/亲和，也不再继续。
@@ -371,11 +371,6 @@ func handleMultiChannel(
 					reqCtx.model = mappedModel
 					reqCtx.updateLive()
 				}
-				channelScheduler.RecordSuccessWithUsage(upstreamOneKey.GetAllBaseURLs()[successBaseURLIdx], successKey, usage, true, mappedModel, costCents)
-			}
-			if reqCtx != nil && successKey == "" {
-				reqCtx.success = true
-				reqCtx.errorMsg = ""
 			}
 			channelScheduler.SetTraceAffinitySlot(routingKey, channelIndex, selection.KeyIndex)
 			return

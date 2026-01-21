@@ -4,6 +4,22 @@
 
 ---
 
+## [v2.5.8] - 2026-01-21
+
+本版本选择性同步上游 `claude-proxy v2.5.8` 的指标修复相关变更，并对本仓库多槽位调度逻辑做适配。
+
+### 🐛 修复
+
+- **修复多槽位模式指标成功被重复计数**：Messages/Responses/Gemini 多槽位成功路径不再二次记录成功指标
+- **修复客户端取消请求误计入失败指标**
+  - Messages：流式传输错误在 `context canceled` 场景不再记录失败
+  - Responses：`/v1/responses/compact` 在请求方取消时不记录失败/不继续 failover
+
+### 🧩 仓库
+
+- 新增：`.claudeignore`（忽略 `dist/`、`node_modules/` 等目录）
+- **版本号更新**：`VERSION` → `v2.5.8`
+
 ## [v2.5.7] - 2026-01-20
 
 ### ✨ 新增

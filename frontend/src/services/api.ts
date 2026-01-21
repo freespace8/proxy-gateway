@@ -62,6 +62,8 @@ export interface KeyMetrics {
   successRate: number
   consecutiveFailures: number
   circuitBroken: boolean
+  suspendUntil?: string
+  suspendReason?: string
 }
 
 export interface APIKeyMeta {

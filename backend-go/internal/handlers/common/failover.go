@@ -301,11 +301,16 @@ func IsInsufficientBalanceResponse(bodyBytes []byte) bool {
 
 func isInsufficientBalanceMessage(msg string) bool {
 	m := strings.ToLower(msg)
-	if strings.Contains(m, "余额不足") {
+	// 中文常见表达（部分上游/中转站会返回“额度不足/积分不足”）
+	if strings.Contains(m, "余额不足") || strings.Contains(m, "额度不足") || strings.Contains(m, "积分不足") {
 		return true
 	}
 	// 英文常见表达
 	if strings.Contains(m, "insufficient") && strings.Contains(m, "balance") {
+		return true
+	}
+	// 额度/计费相关但不一定包含 balance 字样
+	if strings.Contains(m, "insufficient") && (strings.Contains(m, "quota") || strings.Contains(m, "credit")) {
 		return true
 	}
 	return false

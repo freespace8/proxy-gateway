@@ -21,6 +21,12 @@ func TestToResponse_CircuitBrokenIncludesHardSuspend(t *testing.T) {
 	if !resp.KeyMetrics[0].CircuitBroken {
 		t.Fatalf("expected circuitBroken=true when hard-suspended")
 	}
+	if resp.KeyMetrics[0].SuspendUntil == nil || *resp.KeyMetrics[0].SuspendUntil == "" {
+		t.Fatalf("expected suspendUntil when hard-suspended")
+	}
+	if resp.KeyMetrics[0].SuspendReason != "insufficient_balance" {
+		t.Fatalf("expected suspendReason=insufficient_balance, got %q", resp.KeyMetrics[0].SuspendReason)
+	}
 
 	// 过期但未触发后台清理时，也应视为未熔断
 	m.SuspendKeyUntil(baseURL, apiKey, time.Now().Add(-1*time.Second), "insufficient_balance")
@@ -30,6 +36,12 @@ func TestToResponse_CircuitBrokenIncludesHardSuspend(t *testing.T) {
 	}
 	if resp2.KeyMetrics[0].CircuitBroken {
 		t.Fatalf("expected circuitBroken=false when hard-suspend expired")
+	}
+	if resp2.KeyMetrics[0].SuspendUntil != nil {
+		t.Fatalf("expected suspendUntil=nil when hard-suspend expired")
+	}
+	if resp2.KeyMetrics[0].SuspendReason != "" {
+		t.Fatalf("expected suspendReason empty when hard-suspend expired, got %q", resp2.KeyMetrics[0].SuspendReason)
 	}
 }
 
@@ -49,6 +61,12 @@ func TestToResponseMultiURL_CircuitBrokenIncludesHardSuspend(t *testing.T) {
 	if !resp.KeyMetrics[0].CircuitBroken {
 		t.Fatalf("expected circuitBroken=true when hard-suspended")
 	}
+	if resp.KeyMetrics[0].SuspendUntil == nil || *resp.KeyMetrics[0].SuspendUntil == "" {
+		t.Fatalf("expected suspendUntil when hard-suspended")
+	}
+	if resp.KeyMetrics[0].SuspendReason != "insufficient_balance" {
+		t.Fatalf("expected suspendReason=insufficient_balance, got %q", resp.KeyMetrics[0].SuspendReason)
+	}
 
 	// 过期但未触发后台清理时，也应视为未熔断
 	m.SuspendKeyUntil(baseURL, apiKey, time.Now().Add(-1*time.Second), "insufficient_balance")
@@ -58,5 +76,11 @@ func TestToResponseMultiURL_CircuitBrokenIncludesHardSuspend(t *testing.T) {
 	}
 	if resp2.KeyMetrics[0].CircuitBroken {
 		t.Fatalf("expected circuitBroken=false when hard-suspend expired")
+	}
+	if resp2.KeyMetrics[0].SuspendUntil != nil {
+		t.Fatalf("expected suspendUntil=nil when hard-suspend expired")
+	}
+	if resp2.KeyMetrics[0].SuspendReason != "" {
+		t.Fatalf("expected suspendReason empty when hard-suspend expired, got %q", resp2.KeyMetrics[0].SuspendReason)
 	}
 }

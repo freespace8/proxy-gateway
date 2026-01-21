@@ -953,6 +953,8 @@ type KeyMetricsResponse struct {
 	SuccessRate         float64 `json:"successRate"`
 	ConsecutiveFailures int64   `json:"consecutiveFailures"`
 	CircuitBroken       bool    `json:"circuitBroken"`
+	SuspendUntil        *string `json:"suspendUntil,omitempty"`  // 硬熔断截止时间（例如额度不足到 0 点恢复）
+	SuspendReason       string  `json:"suspendReason,omitempty"` // 硬熔断原因
 }
 
 // ToResponseMultiURL 转换为 API 响应格式（支持多 BaseURL 聚合）
@@ -991,6 +993,8 @@ func (m *MetricsManager) ToResponseMultiURL(channelIndex int, baseURLs []string,
 		failureCount        int64
 		consecutiveFailures int64
 		circuitBroken       bool
+		suspendUntil        *time.Time
+		suspendReason       string
 	}
 	keyAggMap := make(map[string]*keyAggregation) // key: apiKey
 
@@ -1034,6 +1038,14 @@ func (m *MetricsManager) ToResponseMultiURL(channelIndex int, baseURLs []string,
 					if metrics.CircuitBrokenAt != nil || hardSuspended {
 						agg.circuitBroken = true
 					}
+					if hardSuspended {
+						// 取最晚的 SuspendUntil，确保倒计时不提前结束
+						if agg.suspendUntil == nil || metrics.SuspendUntil.After(*agg.suspendUntil) {
+							until := *metrics.SuspendUntil
+							agg.suspendUntil = &until
+							agg.suspendReason = metrics.SuspendReason
+						}
+					}
 				} else {
 					keyAggMap[apiKey] = &keyAggregation{
 						keyMask:             metrics.KeyMask,
@@ -1042,6 +1054,19 @@ func (m *MetricsManager) ToResponseMultiURL(channelIndex int, baseURLs []string,
 						failureCount:        metrics.FailureCount,
 						consecutiveFailures: metrics.ConsecutiveFailures,
 						circuitBroken:       metrics.CircuitBrokenAt != nil || hardSuspended,
+						suspendUntil: func() *time.Time {
+							if !hardSuspended {
+								return nil
+							}
+							until := *metrics.SuspendUntil
+							return &until
+						}(),
+						suspendReason: func() string {
+							if !hardSuspended {
+								return ""
+							}
+							return metrics.SuspendReason
+						}(),
 					}
 				}
 			}
@@ -1056,6 +1081,13 @@ func (m *MetricsManager) ToResponseMultiURL(channelIndex int, baseURLs []string,
 			if agg.requestCount > 0 {
 				keySuccessRate = float64(agg.successCount) / float64(agg.requestCount) * 100
 			}
+			var suspendUntilStr *string
+			var suspendReason string
+			if agg.suspendUntil != nil && now.Before(*agg.suspendUntil) {
+				t := agg.suspendUntil.Format(time.RFC3339)
+				suspendUntilStr = &t
+				suspendReason = agg.suspendReason
+			}
 			keyResponses = append(keyResponses, &KeyMetricsResponse{
 				KeyMask:             agg.keyMask,
 				RequestCount:        agg.requestCount,
@@ -1064,6 +1096,8 @@ func (m *MetricsManager) ToResponseMultiURL(channelIndex int, baseURLs []string,
 				SuccessRate:         keySuccessRate,
 				ConsecutiveFailures: agg.consecutiveFailures,
 				CircuitBroken:       agg.circuitBroken,
+				SuspendUntil:        suspendUntilStr,
+				SuspendReason:       suspendReason,
 			})
 			continue
 		}
@@ -1177,6 +1211,19 @@ func (m *MetricsManager) ToResponse(channelIndex int, baseURL string, activeKeys
 				SuccessRate:         keySuccessRate,
 				ConsecutiveFailures: metrics.ConsecutiveFailures,
 				CircuitBroken:       metrics.CircuitBrokenAt != nil || hardSuspended,
+				SuspendUntil: func() *string {
+					if !hardSuspended {
+						return nil
+					}
+					t := metrics.SuspendUntil.Format(time.RFC3339)
+					return &t
+				}(),
+				SuspendReason: func() string {
+					if !hardSuspended {
+						return ""
+					}
+					return metrics.SuspendReason
+				}(),
 			})
 			continue
 		}

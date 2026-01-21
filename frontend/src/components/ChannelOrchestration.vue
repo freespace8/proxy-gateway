@@ -359,7 +359,12 @@
                     >
                       <td class="text-caption">{{ keyIndex + 1 }}</td>
                       <td class="text-caption">{{ km.keyMask }}</td>
-                      <td class="text-caption">{{ getAPIKeyDescription(element, keyIndex) }}</td>
+                      <td class="text-caption">
+                        <div>{{ getAPIKeyDescription(element, keyIndex) }}</div>
+                        <div v-if="getAPIKeySuspendHint(element.index, keyIndex)" class="text-caption text-warning">
+                          {{ getAPIKeySuspendHint(element.index, keyIndex) }}
+                        </div>
+                      </td>
                       <td>
                         <v-chip
                           v-if="km.circuitBroken"
@@ -613,6 +618,10 @@ const LATENCY_VALID_DURATION = 5 * 60 * 1000
 const currentTime = ref(Date.now())
 let latencyCheckTimer: ReturnType<typeof setInterval> | null = null
 
+// Key 硬熔断自动恢复倒计时（每秒刷新）
+const countdownNow = ref(Date.now())
+let countdownTimer: ReturnType<typeof setInterval> | null = null
+
 // 用于触发活跃度视图更新的时间戳（每 2 秒更新）
 const activityUpdateTick = ref(0)
 let activityUpdateTimer: ReturnType<typeof setInterval> | null = null
@@ -635,6 +644,34 @@ const getAPIKeyDescription = (channel: Channel, keyIndex: number): string => {
   const apiKey = channel.apiKeys?.[keyIndex]
   if (!apiKey) return ''
   return channel.apiKeyMeta?.[apiKey]?.description || ''
+}
+
+const formatCountdown = (ms: number): string => {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000))
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const seconds = totalSeconds % 60
+  const pad2 = (n: number) => n.toString().padStart(2, '0')
+  return `${pad2(hours)}:${pad2(minutes)}:${pad2(seconds)}`
+}
+
+const getSuspendReasonLabel = (reason?: string): string => {
+  if (!reason) return '硬熔断'
+  if (reason === 'insufficient_balance') return '额度不足'
+  return reason
+}
+
+const getAPIKeySuspendHint = (channelIndex: number, keyIndex: number): string => {
+  const km = getChannelMetrics(channelIndex)?.keyMetrics?.[keyIndex]
+  if (!km?.suspendUntil) return ''
+
+  const untilMs = Date.parse(km.suspendUntil)
+  if (Number.isNaN(untilMs)) return ''
+
+  const remaining = untilMs - countdownNow.value
+  if (remaining <= 0) return ''
+
+  return `${getSuspendReasonLabel(km.suspendReason)}，${formatCountdown(remaining)} 后自动恢复`
 }
 
 const isAPIKeyEnabled = (channel: Channel, keyIndex: number): boolean => {
@@ -1273,6 +1310,9 @@ onMounted(() => {
   latencyCheckTimer = setInterval(() => {
     currentTime.value = Date.now()
   }, 30000)
+  countdownTimer = setInterval(() => {
+    countdownNow.value = Date.now()
+  }, 1000)
   // 每 2 秒更新一次 activityUpdateTick，触发活跃度视图更新
   activityUpdateTimer = setInterval(() => {
     activityUpdateTick.value++
@@ -1284,6 +1324,10 @@ onUnmounted(() => {
   if (latencyCheckTimer) {
     clearInterval(latencyCheckTimer)
     latencyCheckTimer = null
+  }
+  if (countdownTimer) {
+    clearInterval(countdownTimer)
+    countdownTimer = null
   }
   if (activityUpdateTimer) {
     clearInterval(activityUpdateTimer)

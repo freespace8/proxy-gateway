@@ -671,9 +671,9 @@ const getAPIKeySuspendHint = (channelIndex: number, keyIndex: number): string =>
   if (Number.isNaN(untilMs)) return ''
 
   const remaining = untilMs - countdownNow.value
-  if (remaining <= 0) return `${getSuspendReasonLabel(km.suspendReason)}，即将自动恢复`
+  if (remaining <= 0) return `${getSuspendReasonLabel(km.suspendReason)} · 恢复中`
 
-  return `${getSuspendReasonLabel(km.suspendReason)}，${formatCountdown(remaining)} 后自动恢复`
+  return `${getSuspendReasonLabel(km.suspendReason)} · ${formatCountdown(remaining)}`
 }
 
 const isAPIKeyEnabled = (channel: Channel, keyIndex: number): boolean => {

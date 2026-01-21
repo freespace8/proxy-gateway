@@ -324,6 +324,14 @@ func TestResponsesHandler_MultiChannel_FailoverToNextChannel(t *testing.T) {
 	if !strings.Contains(w.Body.String(), `"id":"resp_2"`) {
 		t.Fatalf("unexpected body: %s", w.Body.String())
 	}
+
+	km := sch.GetResponsesMetricsManager().GetKeyMetrics(upstream2.URL, "rk2")
+	if km == nil {
+		t.Fatalf("missing responses key metrics for rk2")
+	}
+	if km.RequestCount != 1 || km.SuccessCount != 1 {
+		t.Fatalf("unexpected responses metrics: request=%d success=%d failure=%d", km.RequestCount, km.SuccessCount, km.FailureCount)
+	}
 }
 
 func TestResponsesHandler_Stream_InsertsUsageWhenMissing(t *testing.T) {

@@ -971,6 +971,7 @@ func (m *MetricsManager) ToResponseMultiURL(channelIndex int, baseURLs []string,
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
+	now := time.Now()
 	resp := &MetricsResponse{
 		ChannelIndex: channelIndex,
 		Latency:      latency,
@@ -1002,6 +1003,7 @@ func (m *MetricsManager) ToResponseMultiURL(channelIndex int, baseURLs []string,
 		for _, apiKey := range activeKeys {
 			metricsKey := generateMetricsKey(baseURL, apiKey)
 			if metrics, exists := m.keyMetrics[metricsKey]; exists {
+				hardSuspended := metrics.SuspendUntil != nil && now.Before(*metrics.SuspendUntil)
 				resp.RequestCount += metrics.RequestCount
 				resp.SuccessCount += metrics.SuccessCount
 				resp.FailureCount += metrics.FailureCount
@@ -1029,7 +1031,7 @@ func (m *MetricsManager) ToResponseMultiURL(channelIndex int, baseURLs []string,
 					if metrics.ConsecutiveFailures > agg.consecutiveFailures {
 						agg.consecutiveFailures = metrics.ConsecutiveFailures
 					}
-					if metrics.CircuitBrokenAt != nil {
+					if metrics.CircuitBrokenAt != nil || hardSuspended {
 						agg.circuitBroken = true
 					}
 				} else {
@@ -1039,7 +1041,7 @@ func (m *MetricsManager) ToResponseMultiURL(channelIndex int, baseURLs []string,
 						successCount:        metrics.SuccessCount,
 						failureCount:        metrics.FailureCount,
 						consecutiveFailures: metrics.ConsecutiveFailures,
-						circuitBroken:       metrics.CircuitBrokenAt != nil,
+						circuitBroken:       metrics.CircuitBrokenAt != nil || hardSuspended,
 					}
 				}
 			}
@@ -1122,6 +1124,7 @@ func (m *MetricsManager) ToResponse(channelIndex int, baseURL string, activeKeys
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
+	now := time.Now()
 	resp := &MetricsResponse{
 		ChannelIndex: channelIndex,
 		Latency:      latency,
@@ -1141,6 +1144,7 @@ func (m *MetricsManager) ToResponse(channelIndex int, baseURL string, activeKeys
 	for _, apiKey := range activeKeys {
 		metricsKey := generateMetricsKey(baseURL, apiKey)
 		if metrics, exists := m.keyMetrics[metricsKey]; exists {
+			hardSuspended := metrics.SuspendUntil != nil && now.Before(*metrics.SuspendUntil)
 			resp.RequestCount += metrics.RequestCount
 			resp.SuccessCount += metrics.SuccessCount
 			resp.FailureCount += metrics.FailureCount
@@ -1172,7 +1176,7 @@ func (m *MetricsManager) ToResponse(channelIndex int, baseURL string, activeKeys
 				FailureCount:        metrics.FailureCount,
 				SuccessRate:         keySuccessRate,
 				ConsecutiveFailures: metrics.ConsecutiveFailures,
-				CircuitBroken:       metrics.CircuitBrokenAt != nil,
+				CircuitBroken:       metrics.CircuitBrokenAt != nil || hardSuspended,
 			})
 			continue
 		}

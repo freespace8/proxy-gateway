@@ -424,6 +424,14 @@ func TestGeminiHandler_MultiChannel_FailoverToNextChannel(t *testing.T) {
 	if calls2.Load() != 1 {
 		t.Fatalf("upstream2 calls = %d, want %d", calls2.Load(), 1)
 	}
+
+	km := sch.GetGeminiMetricsManager().GetKeyMetrics(upstream2.URL, "gk2")
+	if km == nil {
+		t.Fatalf("missing gemini key metrics for gk2")
+	}
+	if km.RequestCount != 1 || km.SuccessCount != 1 {
+		t.Fatalf("unexpected gemini metrics: request=%d success=%d failure=%d", km.RequestCount, km.SuccessCount, km.FailureCount)
+	}
 }
 
 func TestGeminiHandler_Stream_Success(t *testing.T) {

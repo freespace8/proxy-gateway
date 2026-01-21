@@ -547,6 +547,11 @@ func tryChannelWithAllKeys(
 			channelScheduler.MarkURLSuccess(channelIndex, currentBaseURL)
 
 			usage := handleSuccess(c, resp, upstream.ServiceType, envCfg, startTime, geminiReq, model, isStream)
+			// 记录成功指标：multi-channel 路径不会走 single-channel 的记录逻辑
+			// 若请求方已取消，则不计入成功
+			if c.Request.Context().Err() == nil {
+				channelScheduler.RecordGeminiSuccessWithUsage(currentBaseURL, apiKey, usage, model, 0)
+			}
 			if reqCtx != nil {
 				reqCtx.usage = usage
 				reqCtx.success = true

@@ -581,6 +581,18 @@ func tryChannelWithAllKeys(
 			channelScheduler.MarkURLSuccess(channelIndex, currentBaseURL)
 
 			usage := handleSuccess(c, resp, provider, upstream.ServiceType, envCfg, sessionManager, startTime, &responsesReq, bodyBytes)
+			// 记录成功指标：multi-channel 路径不会走 single-channel 的记录逻辑
+			// 若请求方已取消，则不计入成功
+			if c.Request.Context().Err() == nil {
+				var costCents int64
+				if billingHandler != nil && usage != nil {
+					costCents = billingHandler.CalculateCost(mappedModel, usage.InputTokens, usage.OutputTokens, usage.CacheCreationInputTokens, usage.CacheReadInputTokens)
+				}
+				channelScheduler.RecordSuccessWithUsage(currentBaseURL, apiKey, usage, true, mappedModel, costCents)
+				if reqCtx != nil {
+					reqCtx.costCents = costCents
+				}
+			}
 			// 计费扣费
 			if billingHandler != nil && billingCtx != nil && usage != nil {
 				billingHandler.AfterRequest(billingCtx, mappedModel, usage.InputTokens, usage.OutputTokens, usage.CacheCreationInputTokens, usage.CacheReadInputTokens)

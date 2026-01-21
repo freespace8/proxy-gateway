@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/BenedictKing/claude-proxy/internal/metrics"
 	"github.com/gin-gonic/gin"
 )
 
@@ -29,8 +30,9 @@ func TestValidateCodexRightKey(t *testing.T) {
 		}))
 		defer srv.Close()
 
+		mm := metrics.NewMetricsManagerWithConfig(10, 0.5)
 		r := gin.New()
-		r.POST("/validate", ValidateCodexRightKey())
+		r.POST("/validate", ValidateCodexRightKey(mm))
 
 		reqBody := []byte(`{"apiKey":"rk-test","baseUrl":"` + srv.URL + `"}`)
 		req := httptest.NewRequest(http.MethodPost, "/validate", bytes.NewReader(reqBody))
@@ -57,8 +59,9 @@ func TestValidateCodexRightKey(t *testing.T) {
 		}))
 		defer srv.Close()
 
+		mm := metrics.NewMetricsManagerWithConfig(10, 0.5)
 		r := gin.New()
-		r.POST("/validate", ValidateCodexRightKey())
+		r.POST("/validate", ValidateCodexRightKey(mm))
 
 		req := httptest.NewRequest(http.MethodPost, "/validate", bytes.NewReader([]byte(`{"apiKey":"rk-test","baseUrl":"`+srv.URL+`"}`)))
 		req.Header.Set("Content-Type", "application/json")
@@ -73,6 +76,10 @@ func TestValidateCodexRightKey(t *testing.T) {
 		}
 		if !bytes.Contains(w.Body.Bytes(), []byte(`"statusCode":403`)) {
 			t.Fatalf("resp=%s", w.Body.String())
+		}
+
+		if mm.IsKeyHardSuspended(srv.URL, "rk-test") {
+			t.Fatalf("should_not_suspend")
 		}
 	})
 
@@ -87,8 +94,9 @@ func TestValidateCodexRightKey(t *testing.T) {
 		}))
 		defer srv.Close()
 
+		mm := metrics.NewMetricsManagerWithConfig(10, 0.5)
 		r := gin.New()
-		r.POST("/validate", ValidateCodexRightKey())
+		r.POST("/validate", ValidateCodexRightKey(mm))
 
 		req := httptest.NewRequest(http.MethodPost, "/validate", bytes.NewReader([]byte(`{"apiKey":"rk-test","baseUrl":"`+srv.URL+`"}`)))
 		req.Header.Set("Content-Type", "application/json")
@@ -103,6 +111,41 @@ func TestValidateCodexRightKey(t *testing.T) {
 		}
 		if !bytes.Contains(w.Body.Bytes(), []byte(`"statusCode":403`)) {
 			t.Fatalf("resp=%s", w.Body.String())
+		}
+
+		if !mm.IsKeyHardSuspended(srv.URL, "rk-test") {
+			t.Fatalf("should_suspend")
+		}
+	})
+
+	t.Run("fail_non_2xx_insufficient_balance_should_suspend", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/v1/responses" {
+				t.Fatalf("path=%s", r.URL.Path)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"error":{"message":"API Key额度不足"}}`))
+		}))
+		defer srv.Close()
+
+		mm := metrics.NewMetricsManagerWithConfig(10, 0.5)
+		r := gin.New()
+		r.POST("/validate", ValidateCodexRightKey(mm))
+
+		req := httptest.NewRequest(http.MethodPost, "/validate", bytes.NewReader([]byte(`{"apiKey":"rk-test","baseUrl":"`+srv.URL+`"}`)))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+		}
+		if !bytes.Contains(w.Body.Bytes(), []byte(`"success":false`)) {
+			t.Fatalf("resp=%s", w.Body.String())
+		}
+		if !mm.IsKeyHardSuspended(srv.URL, "rk-test") {
+			t.Fatalf("should_suspend")
 		}
 	})
 }

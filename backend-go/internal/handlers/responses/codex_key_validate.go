@@ -10,7 +10,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/BenedictKing/claude-proxy/internal/handlers/common"
 	"github.com/BenedictKing/claude-proxy/internal/httpclient"
+	"github.com/BenedictKing/claude-proxy/internal/metrics"
+	"github.com/BenedictKing/claude-proxy/internal/utils"
 	"github.com/gin-gonic/gin"
 )
 
@@ -25,7 +28,7 @@ type validateCodexKeyResponse struct {
 	UpstreamError string `json:"upstreamError,omitempty"`
 }
 
-func ValidateCodexRightKey() gin.HandlerFunc {
+func ValidateCodexRightKey(metricsManager *metrics.MetricsManager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req validateCodexKeyRequest
 		if err := c.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.APIKey) == "" || strings.TrimSpace(req.BaseURL) == "" {
@@ -33,10 +36,13 @@ func ValidateCodexRightKey() gin.HandlerFunc {
 			return
 		}
 
-		ok, statusCode, upstreamErr, err := validateCodexKeyWithBaseURL(
+		baseURL := strings.TrimSpace(req.BaseURL)
+		apiKey := strings.TrimSpace(req.APIKey)
+
+		ok, statusCode, upstreamErr, isInsufficientBalance, err := validateCodexKeyWithBaseURL(
 			c.Request.Context(),
-			strings.TrimSpace(req.BaseURL),
-			strings.TrimSpace(req.APIKey),
+			baseURL,
+			apiKey,
 		)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "validate_failed"})
@@ -48,6 +54,11 @@ func ValidateCodexRightKey() gin.HandlerFunc {
 			return
 		}
 
+		// 点击“检测”发现额度不足时，也需要立即进入硬熔断（到本地 0 点自动恢复），避免后续无意义重试。
+		if isInsufficientBalance && metricsManager != nil {
+			metricsManager.SuspendKeyUntil(baseURL, apiKey, utils.NextLocalMidnight(time.Now()), "insufficient_balance")
+		}
+
 		c.JSON(http.StatusOK, validateCodexKeyResponse{
 			Success:       false,
 			StatusCode:    statusCode,
@@ -56,7 +67,7 @@ func ValidateCodexRightKey() gin.HandlerFunc {
 	}
 }
 
-func validateCodexKeyWithBaseURL(ctx context.Context, baseURL string, apiKey string) (bool, int, string, error) {
+func validateCodexKeyWithBaseURL(ctx context.Context, baseURL string, apiKey string) (bool, int, string, bool, error) {
 	payload := map[string]any{
 		"model": "gpt-5.2",
 		"input": []any{
@@ -79,23 +90,24 @@ func validateCodexKeyWithBaseURL(ctx context.Context, baseURL string, apiKey str
 	targetURL := buildCodexResponsesURL(baseURL)
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(body))
 	if err != nil {
-		return false, 0, "", err
+		return false, 0, "", false, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
 
 	resp, err := client.Do(httpReq)
 	if err != nil {
-		return false, 0, "", err
+		return false, 0, "", false, err
 	}
 	defer resp.Body.Close()
 
 	const maxRead = 8 * 1024
 	peekBytes, _ := io.ReadAll(io.LimitReader(resp.Body, maxRead))
 	peekText := strings.TrimSpace(string(peekBytes))
+	isInsufficientBalance := isInsufficientBalanceBody(peekBytes, peekText)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return false, resp.StatusCode, summarizeUpstreamError(resp.StatusCode, peekText), nil
+		return false, resp.StatusCode, summarizeUpstreamError(resp.StatusCode, peekText), isInsufficientBalance, nil
 	}
 
 	if looksLikeWrappedUpstreamError(peekText) {
@@ -104,10 +116,10 @@ func validateCodexKeyWithBaseURL(ctx context.Context, baseURL string, apiKey str
 		if wrappedStatus == 0 {
 			wrappedStatus = http.StatusBadGateway
 		}
-		return false, wrappedStatus, summarizeUpstreamError(wrappedStatus, wrappedSummary), nil
+		return false, wrappedStatus, summarizeUpstreamError(wrappedStatus, wrappedSummary), isInsufficientBalance, nil
 	}
 
-	return true, 0, "", nil
+	return true, 0, "", false, nil
 }
 
 func buildCodexResponsesURL(inputBaseURL string) string {
@@ -205,6 +217,70 @@ func parseWrappedUpstreamError(body string) (int, string) {
 		}
 	}
 	return code, extractWrappedErrorSummary(body)
+}
+
+func isInsufficientBalanceBody(bodyBytes []byte, bodyText string) bool {
+	if common.IsInsufficientBalanceResponse(bodyBytes) {
+		return true
+	}
+
+	if bodyText == "" {
+		return false
+	}
+
+	// 支持“2xx 但 body 是错误封装”的场景：优先从 responseBody / errorMessage 中提取。
+	if looksLikeWrappedUpstreamError(bodyText) {
+		if rb := extractWrappedResponseBody(bodyText); rb != "" {
+			if common.IsInsufficientBalanceResponse([]byte(rb)) {
+				return true
+			}
+			if looksLikeInsufficientBalanceText(rb) {
+				return true
+			}
+		}
+		if em := extractWrappedErrorMessage(bodyText); looksLikeInsufficientBalanceText(em) {
+			return true
+		}
+	}
+
+	// 兜底：body 非 JSON 或被截断时，仍能命中关键字。
+	return looksLikeInsufficientBalanceText(bodyText)
+}
+
+func extractWrappedResponseBody(body string) string {
+	var m map[string]any
+	if err := json.Unmarshal([]byte(body), &m); err != nil {
+		return ""
+	}
+	if v, ok := m["responseBody"].(string); ok {
+		return v
+	}
+	return ""
+}
+
+func extractWrappedErrorMessage(body string) string {
+	var m map[string]any
+	if err := json.Unmarshal([]byte(body), &m); err != nil {
+		return ""
+	}
+	if v, ok := m["errorMessage"].(string); ok {
+		return v
+	}
+	return ""
+}
+
+func looksLikeInsufficientBalanceText(msg string) bool {
+	m := strings.ToLower(msg)
+	if strings.Contains(m, "余额不足") || strings.Contains(m, "额度不足") || strings.Contains(m, "积分不足") {
+		return true
+	}
+	if strings.Contains(m, "insufficient") && strings.Contains(m, "balance") {
+		return true
+	}
+	if strings.Contains(m, "insufficient") && (strings.Contains(m, "quota") || strings.Contains(m, "credit")) {
+		return true
+	}
+	return false
 }
 
 func summarizeUpstreamError(statusCode int, raw string) string {

@@ -1162,11 +1162,14 @@ const validateKey = async (channelId: number, keyIndex: number, keyMask: string,
     const resp = await api.validateCodexRightKey(baseUrl, rawKey)
     if (resp?.success) {
       emit('success', `检测成功 ${keyMask}`)
-      return
+    } else {
+      const statusCode = resp?.statusCode ? String(resp.statusCode) : '未知'
+      const summary = String(resp?.upstreamError || '校验失败')
+      emit('error', `检测失败 ${keyMask}: ${statusCode} ${summary}`)
     }
-    const statusCode = resp?.statusCode ? String(resp.statusCode) : '未知'
-    const summary = String(resp?.upstreamError || '校验失败')
-    emit('error', `检测失败 ${keyMask}: ${statusCode} ${summary}`)
+
+    // 检测可能触发“硬熔断到0点”，刷新一次指标便于立即看到状态与倒计时。
+    await refreshMetrics()
   } catch (e: any) {
     emit('error', `检测失败 ${keyMask}: ${e?.message || '未知错误'}`)
   } finally {

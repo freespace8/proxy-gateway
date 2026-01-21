@@ -212,7 +212,7 @@ func main() {
 		apiGroup.GET("/responses/global/stats/history", handlers.GetGlobalStatsHistory(responsesMetricsManager))
 		apiGroup.GET("/responses/ping/:id", responses.PingChannel(cfgManager))
 		apiGroup.GET("/responses/ping", responses.PingAllChannels(cfgManager))
-		apiGroup.POST("/responses/codex/keys/validate", responses.ValidateCodexRightKey())
+		apiGroup.POST("/responses/codex/keys/validate", responses.ValidateCodexRightKey(responsesMetricsManager))
 
 		// Gemini 渠道管理
 		apiGroup.GET("/gemini/channels", gemini.GetUpstreams(cfgManager))

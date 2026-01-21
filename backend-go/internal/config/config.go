@@ -246,6 +246,30 @@ func (cm *ConfigManager) IsKeyFailed(apiKey string) bool {
 	return cm.isKeyFailed(apiKey)
 }
 
+// GetKeyCooldownUntil 返回 Key 冷却（失败暂不可用）截止时间。
+// ok=false 表示当前不在冷却期内（或不存在记录）。
+func (cm *ConfigManager) GetKeyCooldownUntil(apiKey string) (until time.Time, ok bool) {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+
+	failure, exists := cm.failedKeysCache[apiKey]
+	if !exists {
+		return time.Time{}, false
+	}
+
+	recoveryTime := cm.keyRecoveryTime
+	if failure.FailureCount > cm.maxFailureCount {
+		recoveryTime = cm.keyRecoveryTime * 2
+	}
+
+	now := time.Now()
+	until = failure.Timestamp.Add(recoveryTime)
+	if !now.Before(until) {
+		return time.Time{}, false
+	}
+	return until, true
+}
+
 // ClearFailedKey 手动清理单个 Key 的冷却状态（用于管理员重置）
 func (cm *ConfigManager) ClearFailedKey(apiKey string) {
 	cm.mu.Lock()

@@ -656,8 +656,10 @@ const formatCountdown = (ms: number): string => {
 }
 
 const getSuspendReasonLabel = (reason?: string): string => {
-  if (!reason) return '硬熔断'
+  if (!reason) return '熔断中'
   if (reason === 'insufficient_balance') return '额度不足'
+  if (reason === 'cooldown') return '普通熔断'
+  if (reason === 'circuit') return '熔断中'
   return reason
 }
 
@@ -669,7 +671,7 @@ const getAPIKeySuspendHint = (channelIndex: number, keyIndex: number): string =>
   if (Number.isNaN(untilMs)) return ''
 
   const remaining = untilMs - countdownNow.value
-  if (remaining <= 0) return ''
+  if (remaining <= 0) return `${getSuspendReasonLabel(km.suspendReason)}，即将自动恢复`
 
   return `${getSuspendReasonLabel(km.suspendReason)}，${formatCountdown(remaining)} 后自动恢复`
 }

@@ -1046,28 +1046,37 @@ func (m *MetricsManager) ToResponseMultiURL(channelIndex int, baseURLs []string,
 							agg.suspendReason = metrics.SuspendReason
 						}
 					}
+					if metrics.CircuitBrokenAt != nil {
+						until := metrics.CircuitBrokenAt.Add(m.circuitRecoveryTime)
+						if agg.suspendUntil == nil || until.After(*agg.suspendUntil) {
+							u := until
+							agg.suspendUntil = &u
+							agg.suspendReason = "circuit"
+						}
+					}
 				} else {
-					keyAggMap[apiKey] = &keyAggregation{
+					agg := &keyAggregation{
 						keyMask:             metrics.KeyMask,
 						requestCount:        metrics.RequestCount,
 						successCount:        metrics.SuccessCount,
 						failureCount:        metrics.FailureCount,
 						consecutiveFailures: metrics.ConsecutiveFailures,
 						circuitBroken:       metrics.CircuitBrokenAt != nil || hardSuspended,
-						suspendUntil: func() *time.Time {
-							if !hardSuspended {
-								return nil
-							}
-							until := *metrics.SuspendUntil
-							return &until
-						}(),
-						suspendReason: func() string {
-							if !hardSuspended {
-								return ""
-							}
-							return metrics.SuspendReason
-						}(),
 					}
+					if hardSuspended {
+						until := *metrics.SuspendUntil
+						agg.suspendUntil = &until
+						agg.suspendReason = metrics.SuspendReason
+					}
+					if metrics.CircuitBrokenAt != nil {
+						until := metrics.CircuitBrokenAt.Add(m.circuitRecoveryTime)
+						if agg.suspendUntil == nil || until.After(*agg.suspendUntil) {
+							u := until
+							agg.suspendUntil = &u
+							agg.suspendReason = "circuit"
+						}
+					}
+					keyAggMap[apiKey] = agg
 				}
 			}
 		}
@@ -1083,7 +1092,7 @@ func (m *MetricsManager) ToResponseMultiURL(channelIndex int, baseURLs []string,
 			}
 			var suspendUntilStr *string
 			var suspendReason string
-			if agg.suspendUntil != nil && now.Before(*agg.suspendUntil) {
+			if agg.suspendUntil != nil {
 				t := agg.suspendUntil.Format(time.RFC3339)
 				suspendUntilStr = &t
 				suspendReason = agg.suspendReason
@@ -1203,6 +1212,26 @@ func (m *MetricsManager) ToResponse(channelIndex int, baseURL string, activeKeys
 			if metrics.RequestCount > 0 {
 				keySuccessRate = float64(metrics.SuccessCount) / float64(metrics.RequestCount) * 100
 			}
+			var bestUntil *time.Time
+			bestReason := ""
+			if hardSuspended {
+				until := *metrics.SuspendUntil
+				bestUntil = &until
+				bestReason = metrics.SuspendReason
+			}
+			if metrics.CircuitBrokenAt != nil {
+				until := metrics.CircuitBrokenAt.Add(m.circuitRecoveryTime)
+				if bestUntil == nil || until.After(*bestUntil) {
+					u := until
+					bestUntil = &u
+					bestReason = "circuit"
+				}
+			}
+			var suspendUntilStr *string
+			if bestUntil != nil {
+				t := bestUntil.Format(time.RFC3339)
+				suspendUntilStr = &t
+			}
 			keyResponses = append(keyResponses, &KeyMetricsResponse{
 				KeyMask:             metrics.KeyMask,
 				RequestCount:        metrics.RequestCount,
@@ -1211,19 +1240,8 @@ func (m *MetricsManager) ToResponse(channelIndex int, baseURL string, activeKeys
 				SuccessRate:         keySuccessRate,
 				ConsecutiveFailures: metrics.ConsecutiveFailures,
 				CircuitBroken:       metrics.CircuitBrokenAt != nil || hardSuspended,
-				SuspendUntil: func() *string {
-					if !hardSuspended {
-						return nil
-					}
-					t := metrics.SuspendUntil.Format(time.RFC3339)
-					return &t
-				}(),
-				SuspendReason: func() string {
-					if !hardSuspended {
-						return ""
-					}
-					return metrics.SuspendReason
-				}(),
+				SuspendUntil:        suspendUntilStr,
+				SuspendReason:       bestReason,
 			})
 			continue
 		}

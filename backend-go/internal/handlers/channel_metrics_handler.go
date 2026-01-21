@@ -33,9 +33,21 @@ func GetChannelMetricsWithConfig(metricsManager *metrics.MetricsManager, cfgMana
 				for idx, km := range resp.KeyMetrics {
 					if idx < len(upstream.APIKeys) {
 						apiKey := upstream.APIKeys[idx]
-						// 任一熔断机制触发都算熔断
-						if cfgManager.IsKeyFailed(apiKey) {
+						// 任一熔断机制触发都算熔断；同时下发自动恢复倒计时
+						if until, ok := cfgManager.GetKeyCooldownUntil(apiKey); ok {
 							km.CircuitBroken = true
+							// 取更晚的恢复时间，避免硬熔断/普通熔断倒计时冲突
+							shouldSet := km.SuspendUntil == nil
+							if !shouldSet && km.SuspendUntil != nil {
+								if existing, err := time.Parse(time.RFC3339, *km.SuspendUntil); err != nil || until.After(existing) {
+									shouldSet = true
+								}
+							}
+							if shouldSet {
+								t := until.Format(time.RFC3339)
+								km.SuspendUntil = &t
+								km.SuspendReason = "cooldown"
+							}
 						}
 					}
 				}
@@ -600,8 +612,20 @@ func GetChannelDashboard(cfgManager *config.ConfigManager, sch *scheduler.Channe
 				for idx, km := range resp.KeyMetrics {
 					if idx < len(upstream.APIKeys) {
 						apiKey := upstream.APIKeys[idx]
-						if cfgManager.IsKeyFailed(apiKey) {
+						if until, ok := cfgManager.GetKeyCooldownUntil(apiKey); ok {
 							km.CircuitBroken = true
+							// 取更晚的恢复时间，避免硬熔断/普通熔断倒计时冲突
+							shouldSet := km.SuspendUntil == nil
+							if !shouldSet && km.SuspendUntil != nil {
+								if existing, err := time.Parse(time.RFC3339, *km.SuspendUntil); err != nil || until.After(existing) {
+									shouldSet = true
+								}
+							}
+							if shouldSet {
+								t := until.Format(time.RFC3339)
+								km.SuspendUntil = &t
+								km.SuspendReason = "cooldown"
+							}
 						}
 					}
 				}

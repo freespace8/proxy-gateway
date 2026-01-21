@@ -1,6 +1,8 @@
 package gemini
 
 import (
+	"time"
+
 	"github.com/gin-gonic/gin"
 
 	"github.com/BenedictKing/claude-proxy/internal/config"
@@ -56,8 +58,20 @@ func GetDashboard(cfgManager *config.ConfigManager, sch *scheduler.ChannelSchedu
 				for idx, km := range resp.KeyMetrics {
 					if idx < len(upstream.APIKeys) {
 						apiKey := upstream.APIKeys[idx]
-						if cfgManager.IsKeyFailed(apiKey) {
+						if until, ok := cfgManager.GetKeyCooldownUntil(apiKey); ok {
 							km.CircuitBroken = true
+							// 取更晚的恢复时间，避免硬熔断/普通熔断倒计时冲突
+							shouldSet := km.SuspendUntil == nil
+							if !shouldSet && km.SuspendUntil != nil {
+								if existing, err := time.Parse(time.RFC3339, *km.SuspendUntil); err != nil || until.After(existing) {
+									shouldSet = true
+								}
+							}
+							if shouldSet {
+								t := until.Format(time.RFC3339)
+								km.SuspendUntil = &t
+								km.SuspendReason = "cooldown"
+							}
 						}
 					}
 				}

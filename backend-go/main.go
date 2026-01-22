@@ -257,9 +257,19 @@ func main() {
 		responsesAPI.POST("/channels/:id/keys/index/:keyIndex/reset", handlers.ResetKeyCircuitState(channelScheduler, cfgManager, "responses"))
 		geminiAPI.POST("/channels/:id/keys/index/:keyIndex/reset", handlers.ResetKeyCircuitState(channelScheduler, cfgManager, "gemini"))
 
+		// 批量重置 Key 统计与状态（当前渠道下全部 key）
+		messagesAPI.POST("/channels/:id/keys/reset", handlers.ResetAllKeysCircuitState(channelScheduler, cfgManager, "messages"))
+		responsesAPI.POST("/channels/:id/keys/reset", handlers.ResetAllKeysCircuitState(channelScheduler, cfgManager, "responses"))
+		geminiAPI.POST("/channels/:id/keys/reset", handlers.ResetAllKeysCircuitState(channelScheduler, cfgManager, "gemini"))
+
 		messagesAPI.POST("/channels/:id/keys/index/:keyIndex/reset-state", handlers.ResetKeyCircuitStatus(channelScheduler, cfgManager, "messages"))
 		responsesAPI.POST("/channels/:id/keys/index/:keyIndex/reset-state", handlers.ResetKeyCircuitStatus(channelScheduler, cfgManager, "responses"))
 		geminiAPI.POST("/channels/:id/keys/index/:keyIndex/reset-state", handlers.ResetKeyCircuitStatus(channelScheduler, cfgManager, "gemini"))
+
+		// 批量重置 Key 状态（当前渠道下全部 key）
+		messagesAPI.POST("/channels/:id/keys/reset-state", handlers.ResetAllKeysCircuitStatus(channelScheduler, cfgManager, "messages"))
+		responsesAPI.POST("/channels/:id/keys/reset-state", handlers.ResetAllKeysCircuitStatus(channelScheduler, cfgManager, "responses"))
+		geminiAPI.POST("/channels/:id/keys/reset-state", handlers.ResetAllKeysCircuitStatus(channelScheduler, cfgManager, "gemini"))
 
 		// Key 元信息（启用/禁用）
 		messagesAPI.PATCH("/channels/:id/keys/index/:keyIndex/meta", handlers.PatchAPIKeyMeta(cfgManager, "messages"))

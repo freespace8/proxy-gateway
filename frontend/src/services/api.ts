@@ -603,8 +603,20 @@ class ApiService {
     })
   }
 
+  async resetAllKeyCircuit(apiType: ApiType, channelId: number): Promise<void> {
+    await this.request(`/${apiType}/channels/${channelId}/keys/reset`, {
+      method: 'POST'
+    })
+  }
+
   async resetKeyStatus(apiType: ApiType, channelId: number, keyIndex: number): Promise<void> {
     await this.request(`/${apiType}/channels/${channelId}/keys/index/${keyIndex}/reset-state`, {
+      method: 'POST'
+    })
+  }
+
+  async resetAllKeyStatus(apiType: ApiType, channelId: number): Promise<void> {
+    await this.request(`/${apiType}/channels/${channelId}/keys/reset-state`, {
       method: 'POST'
     })
   }

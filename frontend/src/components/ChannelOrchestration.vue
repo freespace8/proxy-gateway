@@ -335,7 +335,40 @@
 		                    <v-icon size="small" class="mr-1" color="warning">mdi-key</v-icon>
 		                    Key 状态
 	                  </div>
-	                  <v-btn size="x-small" variant="text" @click.stop="refreshMetrics">刷新</v-btn>
+	                  <div class="d-flex align-center ga-2">
+	                    <v-btn size="x-small" variant="text" @click.stop="refreshMetrics">刷新</v-btn>
+	                    <v-btn
+	                      size="x-small"
+	                      variant="text"
+	                      color="warning"
+	                      :loading="isResettingAllKeyStatus(element.index)"
+	                      :disabled="isResettingAllKeyStatus(element.index)"
+	                      @click.stop="resetAllKeyStatus(element.index)"
+	                    >
+	                      全部重置状态
+	                    </v-btn>
+                      <v-btn
+                        size="x-small"
+                        variant="text"
+                        color="warning"
+                        :loading="isResettingAllKeyCircuit(element.index)"
+                        :disabled="isResettingAllKeyCircuit(element.index)"
+                        @click.stop="resetAllKeyCircuit(element.index)"
+                      >
+                        全部重置统计
+                      </v-btn>
+                      <v-btn
+                        v-if="props.channelType === 'responses'"
+                        size="x-small"
+                        variant="text"
+                        color="primary"
+                        :loading="isValidatingAllKeys(element.index)"
+                        :disabled="isValidatingAllKeys(element.index)"
+                        @click.stop="validateAllKeys(element.index)"
+                      >
+                        全部检测
+                      </v-btn>
+	                  </div>
 	                </div>
 	
 	                <v-table density="compact" class="key-metrics-table">
@@ -1139,6 +1172,106 @@ const openCircuitLog = async (channelId: number, keyIndex: number, keyMask: stri
 	    emit('error', e?.message || '重置状态失败')
 	  }
 	}
+
+const resettingAllKeyStatus = ref<Record<number, boolean>>({})
+const isResettingAllKeyStatus = (channelId: number) => !!resettingAllKeyStatus.value[channelId]
+
+const resetAllKeyStatus = async (channelId: number) => {
+  const count = (getChannelMetrics(channelId)?.keyMetrics || []).length
+  const hint = count ? `（${count} 个）` : ''
+  if (!confirm(`确认重置渠道 ${channelId + 1} 下全部 Key 的状态${hint}？此操作会清除熔断/冷却状态，但保留累计统计。`)) return
+
+  if (resettingAllKeyStatus.value[channelId]) return
+  resettingAllKeyStatus.value[channelId] = true
+  try {
+    await api.resetAllKeyStatus(props.channelType, channelId)
+    emit('success', `已重置渠道 ${channelId + 1} 全部 Key 状态`)
+    await refreshMetrics()
+  } catch (e: any) {
+    emit('error', e?.message || '全部重置状态失败')
+  } finally {
+    resettingAllKeyStatus.value[channelId] = false
+  }
+}
+
+const resettingAllKeyCircuit = ref<Record<number, boolean>>({})
+const isResettingAllKeyCircuit = (channelId: number) => !!resettingAllKeyCircuit.value[channelId]
+
+const resetAllKeyCircuit = async (channelId: number) => {
+  const count = (getChannelMetrics(channelId)?.keyMetrics || []).length
+  const hint = count ? `（${count} 个）` : ''
+  if (!confirm(`确认重置渠道 ${channelId + 1} 下全部 Key 的统计数据${hint}？此操作会清空该渠道下各 Key 的请求/成功/失败等累计统计。`)) return
+
+  if (resettingAllKeyCircuit.value[channelId]) return
+  resettingAllKeyCircuit.value[channelId] = true
+  try {
+    await api.resetAllKeyCircuit(props.channelType, channelId)
+    emit('success', `已重置渠道 ${channelId + 1} 全部 Key 统计`)
+    await refreshMetrics()
+  } catch (e: any) {
+    emit('error', e?.message || '全部重置统计失败')
+  } finally {
+    resettingAllKeyCircuit.value[channelId] = false
+  }
+}
+
+const validatingAllKeys = ref<Record<number, boolean>>({})
+const isValidatingAllKeys = (channelId: number) => !!validatingAllKeys.value[channelId]
+
+const validateAllKeys = async (channelId: number) => {
+  if (props.channelType !== 'responses') return
+
+  const ch = props.channels.find(c => c.index === channelId)
+  const baseUrl = ch?.baseUrl || ''
+  if (!baseUrl) {
+    emit('error', `全部检测失败: 渠道 ${channelId + 1} 缺少基础URL`)
+    return
+  }
+
+  const keys = (ch?.apiKeys || []).map((k, i) => ({ rawKey: k, keyIndex: i })).filter(x => !!x.rawKey)
+  if (keys.length === 0) {
+    emit('error', `渠道 ${channelId + 1} 暂无可检测的 Key`)
+    return
+  }
+
+  const concurrency = Math.min(5, keys.length)
+  if (!confirm(`确认检测渠道 ${channelId + 1} 下全部 Key（${keys.length} 个，并发 ${concurrency}）？`)) return
+  if (validatingAllKeys.value[channelId]) return
+  validatingAllKeys.value[channelId] = true
+
+  let ok = 0
+  let fail = 0
+  try {
+    let cursor = 0
+    const worker = async () => {
+      while (true) {
+        const current = cursor
+        cursor++
+        if (current >= keys.length) return
+
+        const { rawKey, keyIndex } = keys[current]
+        const k = `${channelId}-${keyIndex}`
+        validatingKey.value[k] = true
+        try {
+          const resp = await api.validateCodexRightKey(baseUrl, rawKey)
+          if (resp?.success) ok++
+          else fail++
+        } catch {
+          fail++
+        } finally {
+          validatingKey.value[k] = false
+        }
+      }
+    }
+    await Promise.all(Array.from({ length: concurrency }, () => worker()))
+    emit('success', `全部检测完成：成功 ${ok} / 失败 ${fail}`)
+    await refreshMetrics()
+  } catch (e: any) {
+    emit('error', e?.message || '全部检测失败')
+  } finally {
+    validatingAllKeys.value[channelId] = false
+  }
+}
 
 const validateKey = async (channelId: number, keyIndex: number, keyMask: string, rawKey?: string) => {
   if (props.channelType !== 'responses') return

@@ -394,6 +394,9 @@
                       <td class="text-caption">{{ km.keyMask }}</td>
                       <td class="text-caption">
                         <div>{{ getAPIKeyDescription(element, keyIndex) }}</div>
+                        <div v-if="getRightCodesBalanceHint(element.index, keyIndex)" class="text-caption text-info">
+                          {{ getRightCodesBalanceHint(element.index, keyIndex) }}
+                        </div>
                         <div v-if="getAPIKeySuspendHint(element.index, keyIndex)" class="text-caption text-warning">
                           {{ getAPIKeySuspendHint(element.index, keyIndex) }}
                         </div>
@@ -591,7 +594,7 @@
 <script setup lang="ts">
 	import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 	import draggable from 'vuedraggable'
-	import { api, type Channel, type ChannelMetrics, type ChannelStatus, type TimeWindowStats, type ChannelRecentActivity } from '../services/api'
+	import { api, type Channel, type ChannelMetrics, type ChannelStatus, type TimeWindowStats, type ChannelRecentActivity, type RightCodesAccountSummary } from '../services/api'
 	import ChannelStatusBadge from './ChannelStatusBadge.vue'
 	import KeyTrendChart from './KeyTrendChart.vue'
 	import CircuitLogModal from './CircuitLogModal.vue'
@@ -829,12 +832,15 @@ const isMultiChannelMode = computed(() => {
 // 监听 channels 变化
 watch(() => props.channels, initActiveChannels, { immediate: true, deep: true })
 
-// 监听 dashboard props 变化（从父组件传入的合并数据）
-watch(() => props.dashboardMetrics, (newMetrics) => {
-  if (newMetrics) {
-    metrics.value = newMetrics
-  }
-}, { immediate: true })
+	// 监听 dashboard props 变化（从父组件传入的合并数据）
+	watch(() => props.dashboardMetrics, (newMetrics) => {
+	  if (newMetrics) {
+	    metrics.value = newMetrics
+	    if (props.channelType === 'responses') {
+	      setTimeout(() => prefetchRightCodesBalanceForAllKeys(newMetrics), 0)
+	    }
+	  }
+	}, { immediate: true })
 
 watch(() => props.dashboardStats, (newStats) => {
   if (newStats) {
@@ -1127,6 +1133,7 @@ const refreshMetrics = async () => {
     ])
     metrics.value = metricsData
     schedulerStats.value = statsData
+    if (props.channelType === 'responses') prefetchRightCodesBalanceForAllKeys(metricsData)
   } catch (error) {
     console.error('Failed to load metrics:', error)
   } finally {
@@ -1218,6 +1225,103 @@ const resetAllKeyCircuit = async (channelId: number) => {
 const validatingAllKeys = ref<Record<number, boolean>>({})
 const isValidatingAllKeys = (channelId: number) => !!validatingAllKeys.value[channelId]
 
+const rightCodesBalanceHint = ref<Record<string, string>>({})
+const prefetchingRightCodesBalance = ref(false)
+
+const isRightCodesBaseUrl = (input: string): boolean => {
+  const baseUrl = (input || '').trim().replace(/#$/, '')
+  if (!baseUrl) return false
+
+  try {
+    const u = new URL(baseUrl)
+    const host = u.hostname.toLowerCase()
+    return host === 'right.codes' || host === 'www.right.codes' || host.endsWith('.right.codes')
+  } catch {
+    try {
+      const u = new URL(`https://${baseUrl}`)
+      const host = u.hostname.toLowerCase()
+      return host === 'right.codes' || host === 'www.right.codes' || host.endsWith('.right.codes')
+    } catch {
+      return false
+    }
+  }
+}
+
+const formatRightCodesBalance = (summary?: RightCodesAccountSummary): string => {
+  const remaining = summary?.subscription?.remainingQuota
+  const total = summary?.subscription?.totalQuota
+  if (typeof remaining === 'number' && typeof total === 'number') {
+    return `余额: ${Math.trunc(remaining)}/${Math.trunc(total)}`
+  }
+  return ''
+}
+
+const setRightCodesBalanceHint = (channelId: number, keyIndex: number, summary?: RightCodesAccountSummary) => {
+  const key = `${channelId}-${keyIndex}`
+  const v = formatRightCodesBalance(summary)
+  if (v) rightCodesBalanceHint.value[key] = v
+  else delete rightCodesBalanceHint.value[key]
+}
+
+const getRightCodesBalanceHint = (channelId: number, keyIndex: number): string => {
+  return rightCodesBalanceHint.value[`${channelId}-${keyIndex}`] || ''
+}
+
+const prefetchRightCodesBalanceForAllKeys = async (metricsData: ChannelMetrics[]) => {
+  if (props.channelType !== 'responses') return
+  if (prefetchingRightCodesBalance.value) return
+
+  const tasks: Array<{ channelId: number; keyIndex: number; baseUrl: string; rawKey: string }> = []
+  for (const m of metricsData || []) {
+    const ch = props.channels.find(c => c.index === m.channelIndex)
+    if (!ch) continue
+
+    const baseUrl = ch.baseUrl || ''
+    if (!isRightCodesBaseUrl(baseUrl)) continue
+
+    for (let keyIndex = 0; keyIndex < (m.keyMetrics || []).length; keyIndex++) {
+      if (getRightCodesBalanceHint(m.channelIndex, keyIndex)) continue
+
+      const rawKey = ch.apiKeys?.[keyIndex]
+      if (!rawKey) continue
+      tasks.push({ channelId: m.channelIndex, keyIndex, baseUrl, rawKey })
+    }
+  }
+
+  if (tasks.length === 0) return
+
+  prefetchingRightCodesBalance.value = true
+  try {
+    const concurrency = Math.min(5, tasks.length)
+    let cursor = 0
+    const worker = async () => {
+      while (true) {
+        const i = cursor
+        cursor++
+        if (i >= tasks.length) return
+        const t = tasks[i]
+        try {
+          const resp = await api.validateCodexRightKey(t.baseUrl, t.rawKey, { summaryOnly: true })
+          setRightCodesBalanceHint(t.channelId, t.keyIndex, resp?.rightCodes)
+        } catch {
+          // ignore
+        }
+      }
+    }
+    await Promise.all(Array.from({ length: concurrency }, () => worker()))
+  } finally {
+    prefetchingRightCodesBalance.value = false
+  }
+}
+
+const formatRightCodesInfo = (summary?: RightCodesAccountSummary): string => {
+  if (!summary) return ''
+
+  const status = summary.isActive === false ? '已停用' : '活跃'
+  const balance = formatRightCodesBalance(summary)
+  return `${balance ? `${balance}；` : ''}状态: ${status}`
+}
+
 const validateAllKeys = async (channelId: number) => {
   if (props.channelType !== 'responses') return
 
@@ -1254,6 +1358,7 @@ const validateAllKeys = async (channelId: number) => {
         validatingKey.value[k] = true
         try {
           const resp = await api.validateCodexRightKey(baseUrl, rawKey)
+          setRightCodesBalanceHint(channelId, keyIndex, resp?.rightCodes)
           if (resp?.success) ok++
           else fail++
         } catch {
@@ -1293,12 +1398,15 @@ const validateKey = async (channelId: number, keyIndex: number, keyMask: string,
     }
 
     const resp = await api.validateCodexRightKey(baseUrl, rawKey)
+    setRightCodesBalanceHint(channelId, keyIndex, resp?.rightCodes)
     if (resp?.success) {
-      emit('success', `检测成功 ${keyMask}`)
+      const info = formatRightCodesInfo(resp?.rightCodes)
+      emit('success', `检测成功 ${keyMask}${info ? `（${info}）` : ''}`)
     } else {
       const statusCode = resp?.statusCode ? String(resp.statusCode) : '未知'
       const summary = String(resp?.upstreamError || '校验失败')
-      emit('error', `检测失败 ${keyMask}: ${statusCode} ${summary}`)
+      const info = formatRightCodesInfo(resp?.rightCodes)
+      emit('error', `检测失败 ${keyMask}: ${statusCode} ${summary}${info ? `（${info}）` : ''}`)
     }
 
     // 检测可能触发“硬熔断到0点”，刷新一次指标便于立即看到状态与倒计时。

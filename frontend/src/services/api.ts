@@ -150,10 +150,21 @@ export interface PingResult {
   error?: string
 }
 
+export interface RightCodesAccountSummary {
+  balance: number
+  subscription?: {
+    usedQuota?: number
+    totalQuota?: number
+    remainingQuota?: number
+  }
+  isActive?: boolean
+}
+
 export interface ValidateCodexRightKeyResponse {
   success: boolean
   statusCode?: number
   upstreamError?: string
+  rightCodes?: RightCodesAccountSummary
 }
 
 // 历史数据点（用于时间序列图表）
@@ -621,10 +632,14 @@ class ApiService {
     })
   }
 
-  async validateCodexRightKey(baseUrl: string, apiKey: string): Promise<ValidateCodexRightKeyResponse> {
+  async validateCodexRightKey(
+    baseUrl: string,
+    apiKey: string,
+    opts?: { summaryOnly?: boolean }
+  ): Promise<ValidateCodexRightKeyResponse> {
     return this.request('/responses/codex/keys/validate', {
       method: 'POST',
-      body: JSON.stringify({ baseUrl, apiKey })
+      body: JSON.stringify({ baseUrl, apiKey, summaryOnly: opts?.summaryOnly })
     })
   }
 

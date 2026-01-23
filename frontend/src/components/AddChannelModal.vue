@@ -462,6 +462,20 @@
                       添加
                     </v-btn>
                   </div>
+
+                  <v-alert
+                    v-if="props.channelType === 'responses' && lastRightCodesSummary"
+                    type="info"
+                    variant="tonal"
+                    density="comfortable"
+                    rounded="lg"
+                    class="mt-3"
+                  >
+                    <div class="text-body-2">{{ formatRightCodesBalance(lastRightCodesSummary) }}</div>
+                    <div class="text-body-2">
+                      账号状态：{{ lastRightCodesSummary.isActive === false ? '已停用' : '活跃' }}
+                    </div>
+                  </v-alert>
                 </v-card-text>
               </v-card>
             </v-col>
@@ -579,7 +593,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useTheme } from 'vuetify'
-import { api, type Channel, type APIKeyMeta } from '../services/api'
+import { api, type Channel, type APIKeyMeta, type ValidateCodexRightKeyResponse } from '../services/api'
 import { parseQuickInput as parseQuickInputUtil } from '../utils/quickInputParser'
 
 interface Props {
@@ -612,6 +626,18 @@ const detectedBaseUrl = ref('')
 const detectedBaseUrls = ref<string[]>([])
 const detectedApiKeys = ref<string[]>([])
 const detectedServiceType = ref<'openai' | 'gemini' | 'claude' | 'responses' | null>(null)
+
+// Codex（Right.Codes）余额/状态回显（仅在校验接口返回时展示）
+const lastRightCodesSummary = ref<ValidateCodexRightKeyResponse['rightCodes'] | null>(null)
+
+const formatRightCodesBalance = (summary: ValidateCodexRightKeyResponse['rightCodes'] | null): string => {
+  const remaining = summary?.subscription?.remainingQuota
+  const total = summary?.subscription?.totalQuota
+  if (typeof remaining === 'number' && typeof total === 'number') {
+    return `余额: ${Math.trunc(remaining)}/${Math.trunc(total)}`
+  }
+  return summary ? `余额: ${Math.trunc(summary.balance)} USD` : ''
+}
 
 // 详细表单预期请求 URL 预览（防止输入时抖动）
 const formBaseUrlPreview = ref('')
@@ -1181,6 +1207,8 @@ const resetForm = () => {
   errors.serviceType = ''
   errors.baseUrl = ''
 
+  lastRightCodesSummary.value = null
+
   // 重置快速添加模式数据
   quickInput.value = ''
   detectedBaseUrl.value = ''
@@ -1224,6 +1252,7 @@ const loadChannelData = (channel: Channel) => {
 
   // 立即同步 baseUrl 到预览变量，避免等待 debounce
   formBaseUrlPreview.value = channel.baseUrl
+  lastRightCodesSummary.value = null
 }
 
 const addApiKey = async () => {
@@ -1250,6 +1279,7 @@ const addApiKey = async () => {
     isValidatingNewApiKey.value = true
     try {
       const resp = await api.validateCodexRightKey(form.baseUrl, key)
+      lastRightCodesSummary.value = resp?.rightCodes || null
       if (!resp?.success) {
         const statusCode = resp?.statusCode ? String(resp.statusCode) : '未知'
         const summary = String(resp?.upstreamError || '校验失败')
@@ -1258,6 +1288,7 @@ const addApiKey = async () => {
       }
     } catch (e: any) {
       apiKeyError.value = e?.message || '校验失败'
+      lastRightCodesSummary.value = null
       return
     } finally {
       isValidatingNewApiKey.value = false

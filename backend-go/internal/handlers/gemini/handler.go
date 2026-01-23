@@ -510,7 +510,7 @@ func tryChannelWithAllKeys(
 					failedKeys[apiKey] = true
 					cfgManager.MarkKeyAsFailed(apiKey)
 					common.RecordFailureAndStoreLastFailureLog(circuitLogStore, metricsManager, "gemini", currentBaseURL, apiKey, resp.StatusCode, respBodyBytes, fmt.Errorf("上游错误: %d", resp.StatusCode), func() {
-						channelScheduler.RecordGeminiFailure(currentBaseURL, apiKey)
+						channelScheduler.RecordGeminiFailureWithStatus(currentBaseURL, apiKey, resp.StatusCode)
 					})
 					channelScheduler.MarkURLFailure(channelIndex, currentBaseURL)
 					log.Printf("[Gemini-Key] 警告: API密钥失败 (状态: %d)，尝试下一个密钥", resp.StatusCode)
@@ -528,7 +528,7 @@ func tryChannelWithAllKeys(
 
 				// 非 failover 错误
 				common.RecordFailureAndStoreLastFailureLog(circuitLogStore, metricsManager, "gemini", currentBaseURL, apiKey, resp.StatusCode, respBodyBytes, fmt.Errorf("上游错误: %d", resp.StatusCode), func() {
-					channelScheduler.RecordGeminiFailure(currentBaseURL, apiKey)
+					channelScheduler.RecordGeminiFailureWithStatus(currentBaseURL, apiKey, resp.StatusCode)
 				})
 				if reqCtx != nil {
 					reqCtx.success = false
@@ -715,7 +715,7 @@ func handleSingleChannel(
 					failedKeys[apiKey] = true
 					cfgManager.MarkKeyAsFailed(apiKey)
 					common.RecordFailureAndStoreLastFailureLog(circuitLogStore, metricsManager, "gemini", currentBaseURL, apiKey, resp.StatusCode, respBodyBytes, lastError, func() {
-						channelScheduler.RecordGeminiFailure(currentBaseURL, apiKey)
+						channelScheduler.RecordGeminiFailureWithStatus(currentBaseURL, apiKey, resp.StatusCode)
 					})
 					log.Printf("[Gemini-Key] 警告: API密钥失败 (状态: %d)，尝试下一个密钥", resp.StatusCode)
 
@@ -731,7 +731,7 @@ func handleSingleChannel(
 				}
 
 				common.RecordFailureAndStoreLastFailureLog(circuitLogStore, metricsManager, "gemini", currentBaseURL, apiKey, resp.StatusCode, respBodyBytes, fmt.Errorf("上游错误: %d", resp.StatusCode), func() {
-					channelScheduler.RecordGeminiFailure(currentBaseURL, apiKey)
+					channelScheduler.RecordGeminiFailureWithStatus(currentBaseURL, apiKey, resp.StatusCode)
 				})
 				if reqCtx != nil {
 					reqCtx.success = false

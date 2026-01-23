@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log"
+	"net/http"
 	"sort"
 	"sync"
 	"time"
@@ -187,6 +188,15 @@ func (m *MetricsManager) RecordSuccessWithUsage(baseURL, apiKey string, usage *t
 	defer m.mu.Unlock()
 
 	metrics := m.getOrCreateKey(baseURL, apiKey)
+
+	// 若该 Key 当前处于“软熔断”（失败率达到阈值），一旦探测/请求成功应立即恢复可用，避免继续卡在熔断状态。
+	// 说明：ShouldSuspendKeySoft 基于 recentResults 计算；因此这里通过清空滑动窗口实现“成功即恢复”。
+	minRequests := max(3, m.windowSize/2)
+	if len(metrics.recentResults) >= minRequests && m.calculateKeyFailureRateInternal(metrics) >= m.failureThreshold {
+		metrics.recentResults = make([]bool, 0, m.windowSize)
+		log.Printf("[Metrics-Circuit] Key [%s] (%s) 探测成功，清除软熔断窗口以恢复可用", metrics.KeyMask, metrics.BaseURL)
+	}
+
 	metrics.RequestCount++
 	metrics.SuccessCount++
 	metrics.ConsecutiveFailures = 0
@@ -227,6 +237,17 @@ func (m *MetricsManager) RecordSuccessWithUsage(baseURL, apiKey string, usage *t
 
 // RecordFailure 记录失败请求（新方法，使用 baseURL + apiKey）
 func (m *MetricsManager) RecordFailure(baseURL, apiKey string) {
+	m.RecordFailureWithStatus(baseURL, apiKey, 0)
+}
+
+func shouldAffectSoftCircuitWindow(statusCode int) bool {
+	// 上游 502（Bad Gateway）通常是临时网关/上游抖动，客户端会自动重试；不应触发“软熔断”（失败率熔断）。
+	return statusCode != http.StatusBadGateway
+}
+
+// RecordFailureWithStatus 记录失败请求（带状态码）。
+// 说明：当 statusCode=502 时，仍记录连续失败/失败计数与历史，但不影响“软熔断”滑动窗口与熔断判定。
+func (m *MetricsManager) RecordFailureWithStatus(baseURL, apiKey string, statusCode int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -238,13 +259,15 @@ func (m *MetricsManager) RecordFailure(baseURL, apiKey string) {
 	now := time.Now()
 	metrics.LastFailureAt = &now
 
-	// 更新滑动窗口
-	m.appendToWindowKey(metrics, false)
+	if shouldAffectSoftCircuitWindow(statusCode) {
+		// 更新滑动窗口（用于失败率熔断）
+		m.appendToWindowKey(metrics, false)
 
-	// 检查是否刚进入熔断状态
-	if metrics.CircuitBrokenAt == nil && m.isKeyCircuitBroken(metrics) {
-		metrics.CircuitBrokenAt = &now
-		log.Printf("[Metrics-Circuit] Key [%s] (%s) 进入熔断状态（失败率: %.1f%%）", metrics.KeyMask, metrics.BaseURL, m.calculateKeyFailureRateInternal(metrics)*100)
+		// 检查是否刚进入熔断状态
+		if metrics.CircuitBrokenAt == nil && m.isKeyCircuitBroken(metrics) {
+			metrics.CircuitBrokenAt = &now
+			log.Printf("[Metrics-Circuit] Key [%s] (%s) 进入熔断状态（失败率: %.1f%%）", metrics.KeyMask, metrics.BaseURL, m.calculateKeyFailureRateInternal(metrics)*100)
+		}
 	}
 
 	// 记录带时间戳的请求

@@ -526,7 +526,12 @@ func (s *ChannelScheduler) RecordSuccessWithUsage(baseURL, apiKey string, usage 
 
 // RecordFailure 记录渠道失败（使用 baseURL + apiKey）
 func (s *ChannelScheduler) RecordFailure(baseURL, apiKey string, isResponses bool) {
-	s.getMetricsManager(isResponses).RecordFailure(baseURL, apiKey)
+	s.RecordFailureWithStatus(baseURL, apiKey, isResponses, 0)
+}
+
+// RecordFailureWithStatus 记录渠道失败（带状态码）
+func (s *ChannelScheduler) RecordFailureWithStatus(baseURL, apiKey string, isResponses bool, statusCode int) {
+	s.getMetricsManager(isResponses).RecordFailureWithStatus(baseURL, apiKey, statusCode)
 }
 
 // SetTraceAffinity 设置 Trace 亲和
@@ -1059,7 +1064,12 @@ func (s *ChannelScheduler) RecordGeminiSuccessWithUsage(baseURL, apiKey string, 
 
 // RecordGeminiFailure 记录 Gemini 渠道失败
 func (s *ChannelScheduler) RecordGeminiFailure(baseURL, apiKey string) {
-	s.geminiMetricsManager.RecordFailure(baseURL, apiKey)
+	s.RecordGeminiFailureWithStatus(baseURL, apiKey, 0)
+}
+
+// RecordGeminiFailureWithStatus 记录 Gemini 渠道失败（带状态码）
+func (s *ChannelScheduler) RecordGeminiFailureWithStatus(baseURL, apiKey string, statusCode int) {
+	s.geminiMetricsManager.RecordFailureWithStatus(baseURL, apiKey, statusCode)
 }
 
 // GetGeminiMetricsManager 获取 Gemini 渠道指标管理器

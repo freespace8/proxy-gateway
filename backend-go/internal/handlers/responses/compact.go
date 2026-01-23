@@ -251,7 +251,7 @@ func tryCompactChannelWithAllKeys(
 				}
 				failedKeys[apiKey] = true
 				cfgManager.MarkKeyAsFailed(apiKey)
-				channelScheduler.RecordFailure(upstream.BaseURL, apiKey, true)
+				channelScheduler.RecordFailureWithStatus(upstream.BaseURL, apiKey, true, compactErr.status)
 				continue
 			}
 			// 非故障转移错误，返回但标记渠道成功（请求已处理）

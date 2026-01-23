@@ -5,8 +5,10 @@
 
 ## [Unreleased]
 
+### 新增
+- 记录“上游 502 不熔断 + 探测成功自动恢复”的实现与测试变更历史。
+
 ## [0.1.0] - 2026-01-20
 
 ### 新增
 - 初始化 HelloAGENTS 知识库骨架（`project.md`、`wiki/*`、`history/index.md`）。
-

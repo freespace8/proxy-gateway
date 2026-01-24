@@ -9,6 +9,7 @@ type RequestLogRecord struct {
 	ChannelIndex        int       `json:"channelIndex"`
 	ChannelName         string    `json:"channelName"`
 	KeyMask             string    `json:"keyMask"`
+	KeyID               string    `json:"keyId,omitempty"`
 	Timestamp           time.Time `json:"timestamp"`
 	DurationMs          int64     `json:"durationMs"`
 	StatusCode          int       `json:"statusCode"`
@@ -26,8 +27,10 @@ type RequestLogRecord struct {
 
 // RequestLogsResponse API 响应
 type RequestLogsResponse struct {
-	Logs   []RequestLogRecord `json:"logs"`
-	Total  int64              `json:"total"`
-	Limit  int                `json:"limit"`
-	Offset int                `json:"offset"`
+	Logs  []RequestLogRecord `json:"logs"`
+	Total int64              `json:"total"`
+	// TotalRequests 为本次进程内的累计请求数（受“重置统计/清空日志”影响，不受日志容量上限影响）。
+	TotalRequests int64 `json:"totalRequests,omitempty"`
+	Limit         int   `json:"limit"`
+	Offset        int   `json:"offset"`
 }

@@ -12,6 +12,17 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+type fakeRequestLogStats struct {
+	keyCount int64
+}
+
+func (f fakeRequestLogStats) GetTotalRequestCount(string) int64 { return 0 }
+func (f fakeRequestLogStats) GetKeyRequestCount(string, int, string) int64 {
+	return f.keyCount
+}
+func (f fakeRequestLogStats) ResetKey(string, int, string) {}
+func (f fakeRequestLogStats) ResetChannel(string, int)     {}
+
 type fakePromotionConfigManager struct {
 	lastIndex    int
 	lastDuration time.Duration
@@ -81,21 +92,21 @@ func TestChannelMetricsHandlers_CoreEndpoints(t *testing.T) {
 	gm.RecordFailure("https://g0.example.com", "gkey0") // trip circuit
 
 	r := gin.New()
-	r.GET("/m/metrics", GetChannelMetricsWithConfig(mm, cm, false))
-	r.GET("/r/metrics", GetChannelMetricsWithConfig(rm, cm, true))
+	r.GET("/m/metrics", GetChannelMetricsWithConfig(mm, cm, false, nil))
+	r.GET("/r/metrics", GetChannelMetricsWithConfig(rm, cm, true, nil))
 	r.GET("/r/deprecated", GetResponsesChannelMetrics(rm))
 	r.GET("/keys", GetAllKeyMetrics(mm))
 	r.GET("/deprecated", GetChannelMetrics(mm))
 	r.POST("/resume/:id", ResumeChannel(sch, false))
 	r.GET("/stats", GetSchedulerStats(sch))
-	r.GET("/dash", GetChannelDashboard(cm, sch))
+	r.GET("/dash", GetChannelDashboard(cm, sch, nil))
 	r.GET("/m/history", GetChannelMetricsHistory(mm, cm, false))
 	r.GET("/r/history", GetChannelMetricsHistory(rm, cm, true))
 	r.GET("/m/key/history/:id", GetChannelKeyMetricsHistory(mm, cm, false))
 	r.GET("/r/key/history/:id", GetChannelKeyMetricsHistory(rm, cm, true))
 	r.GET("/g/history", GetGeminiChannelMetricsHistory(gm, cm))
 	r.GET("/g/key/history/:id", GetGeminiChannelKeyMetricsHistory(gm, cm))
-	r.GET("/g/metrics", GetGeminiChannelMetrics(gm, cm))
+	r.GET("/g/metrics", GetGeminiChannelMetrics(gm, cm, nil))
 
 	// channel metrics
 	{
@@ -471,6 +482,53 @@ func TestChannelMetricsHandlers_CoreEndpoints(t *testing.T) {
 	}
 	if truncateKeyMask("abcdefghijk", 8) != "abcdefgh" {
 		t.Fatalf("truncateKeyMask long")
+	}
+}
+
+func TestChannelMetricsHandlers_LogRequestCount(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	cfg := config.Config{
+		Upstream: []config.UpstreamConfig{
+			{Name: "m0", ServiceType: "claude", BaseURL: "https://m0.example.com", APIKeys: []string{"mkey0"}, Status: "active"},
+		},
+		LoadBalance: "failover",
+	}
+
+	cm, _ := newTestConfigManager(t, cfg)
+	sch, cleanupSch := newTestScheduler(t, cm)
+	t.Cleanup(cleanupSch)
+
+	mm := sch.GetMessagesMetricsManager()
+
+	r := gin.New()
+	r.GET("/m/metrics", GetChannelMetricsWithConfig(mm, cm, false, fakeRequestLogStats{keyCount: 7}))
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/m/metrics", nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+
+	var payload []map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(payload) != 1 {
+		t.Fatalf("len=%d", len(payload))
+	}
+
+	keyMetricsAny, ok := payload[0]["keyMetrics"].([]any)
+	if !ok || len(keyMetricsAny) != 1 {
+		t.Fatalf("unexpected keyMetrics: %+v", payload[0]["keyMetrics"])
+	}
+	km, ok := keyMetricsAny[0].(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected keyMetrics item: %+v", keyMetricsAny[0])
+	}
+	if km["logRequestCount"] != float64(7) {
+		t.Fatalf("logRequestCount=%v, want %d", km["logRequestCount"], 7)
 	}
 }
 

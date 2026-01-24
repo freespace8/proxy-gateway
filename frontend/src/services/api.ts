@@ -55,7 +55,10 @@ export interface TimeWindowStats {
 }
 
 export interface KeyMetrics {
+  keyId?: string
   keyMask: string
+  /** 按请求日志口径累计（支持重置清零） */
+  logRequestCount?: number
   requestCount: number
   successCount: number
   failureCount: number
@@ -301,6 +304,7 @@ export interface RequestLogRecord {
   channelIndex: number
   channelName: string
   keyMask: string
+  keyId?: string
   timestamp: string
   durationMs: number
   statusCode: number
@@ -319,6 +323,8 @@ export interface RequestLogRecord {
 export interface RequestLogsResponse {
   logs: RequestLogRecord[]
   total: number
+  /** 本次进程内累计请求数（不受日志容量上限影响，受“重置统计/清空日志”影响） */
+  totalRequests?: number
   limit: number
   offset: number
 }

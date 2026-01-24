@@ -45,11 +45,17 @@ func (h *RequestLogsHandler) GetLogs(c *gin.Context) {
 		return
 	}
 
+	var totalRequests int64
+	if stats, ok := h.store.(metrics.RequestLogStatsProvider); ok && stats != nil {
+		totalRequests = stats.GetTotalRequestCount(apiType)
+	}
+
 	c.JSON(http.StatusOK, metrics.RequestLogsResponse{
-		Logs:   logs,
-		Total:  total,
-		Limit:  limit,
-		Offset: offset,
+		Logs:          logs,
+		Total:         total,
+		TotalRequests: totalRequests,
+		Limit:         limit,
+		Offset:        offset,
 	})
 }
 

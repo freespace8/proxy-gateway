@@ -5,6 +5,7 @@
         <v-icon class="mr-2" color="primary">mdi-format-list-bulleted</v-icon>
         <span class="text-subtitle-1">请求日志</span>
         <v-chip size="x-small" class="ml-2" variant="tonal">{{ apiType }}</v-chip>
+        <v-chip size="x-small" class="ml-2" variant="tonal">累计 {{ formatCompactNumber(totalRequests) }}</v-chip>
       </div>
       <div class="d-flex align-center ga-2">
         <v-btn
@@ -167,6 +168,7 @@ const headers = [
 
 const logs = ref<RequestLogRecord[]>([])
 const total = ref(0)
+const totalRequests = ref(0)
 const loading = ref(false)
 const error = ref<unknown>(null)
 
@@ -249,6 +251,7 @@ async function fetchLogs() {
     if (seq !== requestSeq) return
     logs.value = resp.logs || []
     total.value = resp.total || 0
+    totalRequests.value = resp.totalRequests || 0
   } catch (err) {
     if (seq !== requestSeq) return
     error.value = err

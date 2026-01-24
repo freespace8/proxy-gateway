@@ -11,9 +11,15 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// GetChannelMetricsWithConfig 获取渠道指标（需要配置管理器来获取 baseURL 和 keys）
-func GetChannelMetricsWithConfig(metricsManager *metrics.MetricsManager, cfgManager *config.ConfigManager, isResponses bool) gin.HandlerFunc {
+// GetChannelMetricsWithConfig 获取渠道指标（需要配置管理器来获取 baseURL 和 keys）。
+// requestLogStats 可选：用于下发按请求日志口径的累计请求数（logRequestCount）。
+func GetChannelMetricsWithConfig(metricsManager *metrics.MetricsManager, cfgManager *config.ConfigManager, isResponses bool, requestLogStats metrics.RequestLogStatsProvider) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		apiType := "messages"
+		if isResponses {
+			apiType = "responses"
+		}
+
 		cfg := cfgManager.GetConfig()
 		var upstreams []config.UpstreamConfig
 		if isResponses {
@@ -26,6 +32,16 @@ func GetChannelMetricsWithConfig(metricsManager *metrics.MetricsManager, cfgMana
 		for i, upstream := range upstreams {
 			// 使用多 URL 聚合方法获取渠道指标（支持 failover 多端点场景）
 			resp := metricsManager.ToResponseMultiURL(i, upstream.GetAllBaseURLs(), upstream.APIKeys, 0)
+
+			// 请求日志口径的累计请求数（用于对齐“请求监控”）
+			if requestLogStats != nil && resp.KeyMetrics != nil {
+				for _, km := range resp.KeyMetrics {
+					if km == nil || km.KeyID == "" {
+						continue
+					}
+					km.LogRequestCount = requestLogStats.GetKeyRequestCount(apiType, i, km.KeyID)
+				}
+			}
 
 			// 综合两套熔断机制：ConfigManager 的冷却状态 + MetricsManager 的熔断状态
 			// 更新 keyMetrics 中每个 key 的熔断状态
@@ -553,13 +569,18 @@ func truncateKeyMask(keyMask string, maxLen int) string {
 	return keyMask[:maxLen]
 }
 
-// GetChannelDashboard 获取渠道仪表盘数据（合并 channels + metrics + stats）
+// GetChannelDashboard 获取渠道仪表盘数据（合并 channels + metrics + stats）。
 // GET /api/channels/dashboard?type=messages|responses
 // 将原本需要 3 个请求的数据合并为 1 个请求，减少网络开销
-func GetChannelDashboard(cfgManager *config.ConfigManager, sch *scheduler.ChannelScheduler) gin.HandlerFunc {
+// requestLogStats 可选：用于下发按请求日志口径的累计请求数（logRequestCount）。
+func GetChannelDashboard(cfgManager *config.ConfigManager, sch *scheduler.ChannelScheduler, requestLogStats metrics.RequestLogStatsProvider) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// 获取 type 参数，默认为 messages
 		isResponses := strings.ToLower(c.Query("type")) == "responses"
+		apiType := "messages"
+		if isResponses {
+			apiType = "responses"
+		}
 
 		cfg := cfgManager.GetConfig()
 		var upstreams []config.UpstreamConfig
@@ -606,6 +627,16 @@ func GetChannelDashboard(cfgManager *config.ConfigManager, sch *scheduler.Channe
 		metricsResult := make([]gin.H, 0, len(upstreams))
 		for i, upstream := range upstreams {
 			resp := metricsManager.ToResponseMultiURL(i, upstream.GetAllBaseURLs(), upstream.APIKeys, 0)
+
+			// 请求日志口径的累计请求数（用于对齐“请求监控”）
+			if requestLogStats != nil && resp.KeyMetrics != nil {
+				for _, km := range resp.KeyMetrics {
+					if km == nil || km.KeyID == "" {
+						continue
+					}
+					km.LogRequestCount = requestLogStats.GetKeyRequestCount(apiType, i, km.KeyID)
+				}
+			}
 
 			// 综合两套熔断机制：ConfigManager 的冷却状态 + MetricsManager 的熔断状态
 			if resp.KeyMetrics != nil {
@@ -875,9 +906,12 @@ func GetGeminiChannelKeyMetricsHistory(metricsManager *metrics.MetricsManager, c
 	}
 }
 
-// GetGeminiChannelMetrics 获取 Gemini 渠道指标
-func GetGeminiChannelMetrics(metricsManager *metrics.MetricsManager, cfgManager *config.ConfigManager) gin.HandlerFunc {
+// GetGeminiChannelMetrics 获取 Gemini 渠道指标。
+// requestLogStats 可选：用于下发按请求日志口径的累计请求数（logRequestCount）。
+func GetGeminiChannelMetrics(metricsManager *metrics.MetricsManager, cfgManager *config.ConfigManager, requestLogStats metrics.RequestLogStatsProvider) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		apiType := "gemini"
+
 		cfg := cfgManager.GetConfig()
 		upstreams := cfg.GeminiUpstream
 
@@ -885,6 +919,16 @@ func GetGeminiChannelMetrics(metricsManager *metrics.MetricsManager, cfgManager 
 		for i, upstream := range upstreams {
 			// 使用多 URL 聚合方法获取渠道指标（支持 failover 多端点场景）
 			resp := metricsManager.ToResponseMultiURL(i, upstream.GetAllBaseURLs(), upstream.APIKeys, 0)
+
+			// 请求日志口径的累计请求数（用于对齐“请求监控”）
+			if requestLogStats != nil && resp.KeyMetrics != nil {
+				for _, km := range resp.KeyMetrics {
+					if km == nil || km.KeyID == "" {
+						continue
+					}
+					km.LogRequestCount = requestLogStats.GetKeyRequestCount(apiType, i, km.KeyID)
+				}
+			}
 
 			// 综合两套熔断机制：ConfigManager 的冷却状态 + MetricsManager 的熔断状态
 			if resp.KeyMetrics != nil {

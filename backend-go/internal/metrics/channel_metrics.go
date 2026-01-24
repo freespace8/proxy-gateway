@@ -969,7 +969,10 @@ type MetricsResponse struct {
 
 // KeyMetricsResponse 单个 Key 的 API 响应
 type KeyMetricsResponse struct {
-	KeyMask             string  `json:"keyMask"`
+	KeyID   string `json:"keyId,omitempty"`
+	KeyMask string `json:"keyMask"`
+	// LogRequestCount 为按“请求日志”口径统计的累计请求数（由请求日志模块维护，支持重置清零）。
+	LogRequestCount     int64   `json:"logRequestCount,omitempty"`
 	RequestCount        int64   `json:"requestCount"`
 	SuccessCount        int64   `json:"successCount"`
 	FailureCount        int64   `json:"failureCount"`
@@ -1121,6 +1124,7 @@ func (m *MetricsManager) ToResponseMultiURL(channelIndex int, baseURLs []string,
 				suspendReason = agg.suspendReason
 			}
 			keyResponses = append(keyResponses, &KeyMetricsResponse{
+				KeyID:               HashAPIKey(apiKey),
 				KeyMask:             agg.keyMask,
 				RequestCount:        agg.requestCount,
 				SuccessCount:        agg.successCount,
@@ -1136,6 +1140,7 @@ func (m *MetricsManager) ToResponseMultiURL(channelIndex int, baseURLs []string,
 
 		// Key 尚无请求/指标时返回零值，确保前端能展示全部配置的 Key。
 		keyResponses = append(keyResponses, &KeyMetricsResponse{
+			KeyID:               HashAPIKey(apiKey),
 			KeyMask:             utils.MaskAPIKey(apiKey),
 			RequestCount:        0,
 			SuccessCount:        0,
@@ -1256,6 +1261,7 @@ func (m *MetricsManager) ToResponse(channelIndex int, baseURL string, activeKeys
 				suspendUntilStr = &t
 			}
 			keyResponses = append(keyResponses, &KeyMetricsResponse{
+				KeyID:               HashAPIKey(apiKey),
 				KeyMask:             metrics.KeyMask,
 				RequestCount:        metrics.RequestCount,
 				SuccessCount:        metrics.SuccessCount,
@@ -1271,6 +1277,7 @@ func (m *MetricsManager) ToResponse(channelIndex int, baseURL string, activeKeys
 
 		// 即使该 Key 尚无请求，也返回一条零值指标，确保前端能显示配置的 Key 列表。
 		keyResponses = append(keyResponses, &KeyMetricsResponse{
+			KeyID:               HashAPIKey(apiKey),
 			KeyMask:             utils.MaskAPIKey(apiKey),
 			RequestCount:        0,
 			SuccessCount:        0,

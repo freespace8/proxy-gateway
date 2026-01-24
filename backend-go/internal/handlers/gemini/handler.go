@@ -151,11 +151,17 @@ func (h *Handler) Handle(c *gin.Context) {
 			finalStatusCode = 200
 		}
 
+		keyID := ""
+		if reqCtx.apiKey != "" {
+			keyID = metrics.HashAPIKey(reqCtx.apiKey)
+		}
+
 		if err := h.requestLogStore.AddRequestLog(metrics.RequestLogRecord{
 			RequestID:           requestID,
 			ChannelIndex:        reqCtx.channelIndex,
 			ChannelName:         reqCtx.channelName,
 			KeyMask:             utils.MaskAPIKey(reqCtx.apiKey),
+			KeyID:               keyID,
 			Timestamp:           startTime,
 			DurationMs:          time.Since(startTime).Milliseconds(),
 			StatusCode:          finalStatusCode,

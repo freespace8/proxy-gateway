@@ -20,9 +20,9 @@ type probeUpstreamModelsRequest struct {
 }
 
 type probeUpstreamModelsResponse struct {
-	Success       bool           `json:"success"`
-	StatusCode    int            `json:"statusCode,omitempty"`
-	UpstreamError string         `json:"upstreamError,omitempty"`
+	Success       bool            `json:"success"`
+	StatusCode    int             `json:"statusCode,omitempty"`
+	UpstreamError string          `json:"upstreamError,omitempty"`
 	Models        *modelsResponse `json:"models,omitempty"`
 }
 

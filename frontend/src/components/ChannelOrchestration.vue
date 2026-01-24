@@ -411,9 +411,9 @@
                           熔断
                         </v-chip>
                         <v-chip v-else size="x-small" color="success" variant="tonal">正常</v-chip>
-                      </td>
+	                      </td>
 	                      <td>{{ km.successRate?.toFixed(0) }}%</td>
-	                      <td>{{ km.requestCount }}</td>
+	                      <td>{{ km.logRequestCount ?? km.requestCount }}</td>
 	                      <td>{{ km.consecutiveFailures }}</td>
                         <td>
                           <div class="d-flex align-center ga-2">

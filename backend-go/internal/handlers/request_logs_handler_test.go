@@ -71,7 +71,7 @@ func TestRequestLogsHandler_GetLogs_ParsesAPITypeAndPagination(t *testing.T) {
 		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 			t.Fatalf("unmarshal: %v", err)
 		}
-		if resp.Total != 1 || len(resp.Logs) != 1 || resp.Limit != 1 || resp.Offset != 0 {
+		if resp.Total != 1 || resp.TotalRequests != 1 || len(resp.Logs) != 1 || resp.Limit != 1 || resp.Offset != 0 {
 			t.Fatalf("unexpected resp: %+v", resp)
 		}
 	}

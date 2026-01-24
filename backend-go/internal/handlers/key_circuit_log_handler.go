@@ -66,7 +66,7 @@ func GetKeyCircuitLog(store metrics.KeyCircuitLogStore, cfgManager *config.Confi
 	}
 }
 
-func ResetKeyCircuitState(sch *scheduler.ChannelScheduler, cfgManager *config.ConfigManager, apiType string) gin.HandlerFunc {
+func ResetKeyCircuitState(sch *scheduler.ChannelScheduler, cfgManager *config.ConfigManager, apiType string, requestLogStats metrics.RequestLogStatsProvider) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		channelIndex, err := strconv.Atoi(c.Param("id"))
 		if err != nil {
@@ -121,6 +121,11 @@ func ResetKeyCircuitState(sch *scheduler.ChannelScheduler, cfgManager *config.Co
 		}
 
 		cfgManager.ClearFailedKey(apiKey)
+
+		// 清空按“请求日志”口径统计的累计请求数，并隐藏历史日志（本次进程内）。
+		if requestLogStats != nil && apiKey != "" {
+			requestLogStats.ResetKey(apiType, channelIndex, metrics.HashAPIKey(apiKey))
+		}
 
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
@@ -254,7 +259,7 @@ func ResetAllKeysCircuitStatus(sch *scheduler.ChannelScheduler, cfgManager *conf
 	}
 }
 
-func ResetAllKeysCircuitState(sch *scheduler.ChannelScheduler, cfgManager *config.ConfigManager, apiType string) gin.HandlerFunc {
+func ResetAllKeysCircuitState(sch *scheduler.ChannelScheduler, cfgManager *config.ConfigManager, apiType string, requestLogStats metrics.RequestLogStatsProvider) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		channelIndex, err := strconv.Atoi(c.Param("id"))
 		if err != nil {
@@ -306,6 +311,11 @@ func ResetAllKeysCircuitState(sch *scheduler.ChannelScheduler, cfgManager *confi
 
 			cfgManager.ClearFailedKey(apiKey)
 			resetCount++
+		}
+
+		// 清空该渠道下按“请求日志”口径统计的累计请求数，并隐藏历史日志（本次进程内）。
+		if requestLogStats != nil {
+			requestLogStats.ResetChannel(apiType, channelIndex)
 		}
 
 		c.JSON(http.StatusOK, gin.H{

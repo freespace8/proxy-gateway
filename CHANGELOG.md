@@ -4,6 +4,16 @@
 
 ---
 
+## [v2.5.10] - 2026-01-24
+
+### 新增
+
+- **模型列表探测后端兜底** - 新增 `POST /api/admin/upstream/models`，前端优先走后端代探测 `/v1/models`（避免 CORS、减少浏览器侧暴露 Key）
+  - 兼容：若后端不存在该接口则回退到前端直连上游
+  - 涉及文件：`backend-go/internal/handlers/upstream_models_handler.go`、`frontend/src/components/AddChannelModal.vue`、`frontend/src/services/api.ts`、`backend-go/main.go`
+
+---
+
 ## [v2.5.9] - 2026-01-24
 
 ### 新增

@@ -1578,17 +1578,65 @@ const fetchTargetModels = async () => {
     keyModelsStatus.value.set(apiKey, { loading: true, success: false })
 
     try {
-      const response = await fetchUpstreamModels(form.baseUrl, apiKey)
+      const probe = await api.probeUpstreamModels(form.baseUrl, apiKey, {
+        insecureSkipVerify: form.insecureSkipVerify
+      })
+
+      if (probe.success && probe.models) {
+        keyModelsStatus.value.set(apiKey, {
+          loading: false,
+          success: true,
+          statusCode: probe.statusCode || 200,
+          modelCount: probe.models.data.length
+        })
+
+        return probe.models.data
+      }
 
       keyModelsStatus.value.set(apiKey, {
         loading: false,
-        success: true,
-        statusCode: 200,
-        modelCount: response.data.length
+        success: false,
+        statusCode: probe.statusCode || 0,
+        error: probe.upstreamError || '未知错误'
       })
 
-      return response.data
+      return []
     } catch (error) {
+      // 兼容旧版后端：如不存在后端探测接口，则回退到前端直连上游（可能受 CORS 影响）
+      if (error instanceof ApiError && error.status === 404) {
+        try {
+          const response = await fetchUpstreamModels(form.baseUrl, apiKey)
+
+          keyModelsStatus.value.set(apiKey, {
+            loading: false,
+            success: true,
+            statusCode: 200,
+            modelCount: response.data.length
+          })
+
+          return response.data
+        } catch (fallbackError) {
+          let errorMsg = '未知错误'
+          let statusCode = 0
+
+          if (fallbackError instanceof ApiError) {
+            errorMsg = fallbackError.message
+            statusCode = fallbackError.status
+          } else if (fallbackError instanceof Error) {
+            errorMsg = fallbackError.message
+          }
+
+          keyModelsStatus.value.set(apiKey, {
+            loading: false,
+            success: false,
+            statusCode,
+            error: errorMsg
+          })
+
+          return []
+        }
+      }
+
       let errorMsg = '未知错误'
       let statusCode = 0
 

@@ -163,6 +163,10 @@ func main() {
 		messagesAPI := apiGroup.Group("/messages")
 		responsesAPI := apiGroup.Group("/responses")
 		geminiAPI := apiGroup.Group("/gemini")
+		adminAPI := apiGroup.Group("/admin")
+
+		// 上游探测工具（用于管理台辅助配置）
+		adminAPI.POST("/upstream/models", handlers.ProbeUpstreamModels())
 
 		// Messages 渠道管理
 		apiGroup.GET("/messages/channels", messages.GetUpstreams(cfgManager))

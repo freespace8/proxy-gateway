@@ -354,6 +354,13 @@ export interface ModelsResponse {
   data: ModelEntry[]
 }
 
+export interface ProbeUpstreamModelsResponse {
+  success: boolean
+  statusCode?: number
+  upstreamError?: string
+  models?: ModelsResponse
+}
+
 /**
  * 构建上游的 /v1/models 端点 URL
  * 参考：backend-go/internal/handlers/messages/models.go:240-257
@@ -723,6 +730,17 @@ class ApiService {
     return this.request('/responses/codex/keys/validate', {
       method: 'POST',
       body: JSON.stringify({ baseUrl, apiKey, summaryOnly: opts?.summaryOnly })
+    })
+  }
+
+  async probeUpstreamModels(
+    baseUrl: string,
+    apiKey: string,
+    opts?: { insecureSkipVerify?: boolean }
+  ): Promise<ProbeUpstreamModelsResponse> {
+    return this.request('/admin/upstream/models', {
+      method: 'POST',
+      body: JSON.stringify({ baseUrl, apiKey, insecureSkipVerify: opts?.insecureSkipVerify })
     })
   }
 

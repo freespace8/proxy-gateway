@@ -114,14 +114,14 @@ func TestPatchMessageStartEvent_RewriteModelDisabled(t *testing.T) {
 
 func TestCheckEventUsageStatus_MessageUsageBranch(t *testing.T) {
 	ev := "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":10,\"output_tokens\":10}}}\n\n"
-	hasUsage, needPatch, u := CheckEventUsageStatus(ev, true)
-	if !hasUsage || needPatch {
-		t.Fatalf("hasUsage=%v needPatch=%v usage=%+v", hasUsage, needPatch, u)
+	hasUsage, needInputPatch, needOutputPatch, u := CheckEventUsageStatus(ev, true)
+	if !hasUsage || needInputPatch || needOutputPatch {
+		t.Fatalf("hasUsage=%v needInputPatch=%v needOutputPatch=%v usage=%+v", hasUsage, needInputPatch, needOutputPatch, u)
 	}
 
 	// Top-level usage: include TTL mixed
 	ev2 := "data: {\"type\":\"message_delta\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"cache_creation_5m_input_tokens\":1,\"cache_creation_1h_input_tokens\":1}}\n\n"
-	hasUsage2, _, u2 := CheckEventUsageStatus(ev2, true)
+	hasUsage2, _, _, u2 := CheckEventUsageStatus(ev2, true)
 	if !hasUsage2 || u2.CacheTTL != "mixed" {
 		t.Fatalf("hasUsage=%v usage=%+v", hasUsage2, u2)
 	}

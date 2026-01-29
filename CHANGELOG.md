@@ -4,6 +4,21 @@
 
 ---
 
+## [v2.5.11] - 2026-01-29
+
+本版本选择性同步上游 `claude-proxy v2.5.11` 的 Messages 流式 usage 修补相关变更，并保持本仓库现有行为。
+
+### 🐛 修复
+
+- **Messages 流式首包 input_tokens 补齐**：在 `message_start` 事件中，当 `input_tokens` 为 0 或偏小且未命中缓存时，提前以本地估算值补全，提升部分客户端的 tokens 累计准确性
+- **token 修补触发条件与缓存判定完善**：低质量渠道允许在流尾基于本地估算进行校准；缓存命中判定补充 `cache_creation_5m_input_tokens` 以及 `cache_creation_1h_input_tokens`
+
+### 🧩 仓库
+
+- **版本号更新**：`VERSION` → `v2.5.11`
+
+---
+
 ## [v2.5.10] - 2026-01-24
 
 ### 新增

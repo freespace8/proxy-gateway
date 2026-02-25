@@ -18,6 +18,22 @@ func TestNormalizeResponsesReasoningEffort_Gpt52MinimalToLow(t *testing.T) {
 	}
 }
 
+func TestNormalizeResponsesReasoningEffort_Gpt53CodexMinimalToLow(t *testing.T) {
+	req := map[string]interface{}{
+		"model": "gpt-5.3-codex",
+		"reasoning": map[string]interface{}{
+			"effort": "minimal",
+		},
+	}
+
+	normalizeResponsesReasoningEffort(req)
+
+	reasoning := req["reasoning"].(map[string]interface{})
+	if got := reasoning["effort"]; got != "low" {
+		t.Fatalf("effort=%v, want %q", got, "low")
+	}
+}
+
 func TestNormalizeResponsesReasoningEffort_OtherModelsUnchanged(t *testing.T) {
 	req := map[string]interface{}{
 		"model": "gpt-5.1",

@@ -150,9 +150,16 @@ func (p *ResponsesProvider) ConvertToProviderRequest(
 }
 
 func normalizeResponsesReasoningEffort(reqMap map[string]interface{}) {
-	// 目前仅针对 gpt-5.2：reasoning.effort 最小档需使用 low
+	// 兼容特定模型：reasoning.effort 不支持 minimal，需回退到 low。
 	model, ok := reqMap["model"].(string)
-	if !ok || model != "gpt-5.2" {
+	if !ok {
+		return
+	}
+
+	switch model {
+	case "gpt-5.2", "gpt-5.3-codex":
+		// continue
+	default:
 		return
 	}
 

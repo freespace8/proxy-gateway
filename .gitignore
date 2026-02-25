@@ -237,3 +237,4 @@ backend-go/cmd/
 docs/claude-code-investigation-*.md
 helloagents/history
 helloagents/plan
+.pi/superpowers-state.json

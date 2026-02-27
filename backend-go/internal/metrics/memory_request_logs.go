@@ -186,6 +186,29 @@ func (s *MemoryRequestLogStore) QueryRequestLogs(apiType string, limit, offset i
 	return out, total, nil
 }
 
+func (s *MemoryRequestLogStore) GetRequestLogDetail(apiType string, id int64) (*RequestLogRecord, bool) {
+	if s == nil || apiType == "" || id <= 0 {
+		return nil, false
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	for i := 0; i < s.size; i++ {
+		idx := (s.start + i) % s.capacity
+		rec := s.buf[idx]
+		if rec.APIType != apiType || rec.ID != id {
+			continue
+		}
+		if s.shouldFilterRecordLocked(rec) {
+			return nil, false
+		}
+		out := rec
+		return &out, true
+	}
+	return nil, false
+}
+
 // GetKeyRequestCount 返回单 Key 的累计请求数（受 ResetKey/ResetChannel 影响）。
 func (s *MemoryRequestLogStore) GetKeyRequestCount(apiType string, channelIndex int, keyID string) int64 {
 	if s == nil {

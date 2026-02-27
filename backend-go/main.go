@@ -248,8 +248,11 @@ func main() {
 		// 请求日志 API
 		requestLogsHandler := handlers.NewRequestLogsHandler(requestLogStore)
 		messagesAPI.GET("/logs", requestLogsHandler.GetLogs)
+		messagesAPI.GET("/logs/:id", requestLogsHandler.GetLogDetail)
 		responsesAPI.GET("/logs", requestLogsHandler.GetLogs)
+		responsesAPI.GET("/logs/:id", requestLogsHandler.GetLogDetail)
 		geminiAPI.GET("/logs", requestLogsHandler.GetLogs)
+		geminiAPI.GET("/logs/:id", requestLogsHandler.GetLogDetail)
 
 		// Key 熔断日志 & 重置（每个 key 仅保留 1 条熔断时日志）
 		// 注意：/keys/:apiKey 已用于按 key 字符串操作；此处用 /keys/index/:keyIndex 避免 Gin 路由通配冲突

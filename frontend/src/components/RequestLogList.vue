@@ -125,16 +125,30 @@
         </template>
 
         <template #[slotCostCents]="{ item }">
-          <span class="text-caption">{{ formatCost(item.costCents) }}</span>
+          <div class="d-flex align-center justify-end ga-1">
+            <span class="text-caption">{{ formatCost(item.costCents) }}</span>
+            <v-btn
+              size="x-small"
+              density="compact"
+              variant="text"
+              color="primary"
+              @click="openRequestDetail(item.id)"
+            >
+              请求详情
+            </v-btn>
+          </div>
         </template>
       </v-data-table-server>
     </v-card-text>
+
+    <RequestLogDetailModal v-model="detailOpen" :api-type="apiType" :log-id="detailLogId" />
   </v-card>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { api, type ApiType, type RequestLogRecord } from '../services/api'
+import RequestLogDetailModal from './RequestLogDetailModal.vue'
 
 const props = defineProps<{
   apiType: ApiType
@@ -163,7 +177,7 @@ const headers = [
   { title: 'Token', key: 'tokens', width: '120px', align: 'end', sortable: false },
   { title: 'Read Cache', key: 'cacheReadTokens', width: '90px', align: 'end', sortable: false },
   { title: 'Write Cache', key: 'cacheCreationTokens', width: '90px', align: 'end', sortable: false },
-  { title: '成本', key: 'costCents', width: '80px', align: 'end', sortable: false },
+  { title: '成本', key: 'costCents', width: '150px', align: 'end', sortable: false },
 ] as const
 
 const logs = ref<RequestLogRecord[]>([])
@@ -171,6 +185,9 @@ const total = ref(0)
 const totalRequests = ref(0)
 const loading = ref(false)
 const error = ref<unknown>(null)
+
+const detailOpen = ref(false)
+const detailLogId = ref<number | null>(null)
 
 const page = ref(1)
 const itemsPerPage = ref(50)
@@ -297,8 +314,15 @@ function startAutoRefresh() {
 
 watch(() => props.apiType, () => {
   page.value = 1
+  detailOpen.value = false
+  detailLogId.value = null
   fetchLogs()
 })
+
+function openRequestDetail(id: number) {
+  detailLogId.value = id
+  detailOpen.value = true
+}
 
 watch(autoRefresh, enabled => {
   if (enabled) startAutoRefresh()

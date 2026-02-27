@@ -7,6 +7,12 @@ type RequestLogStore interface {
 	QueryRequestLogs(apiType string, limit, offset int) ([]RequestLogRecord, int64, error)
 }
 
+// RequestLogDetailProvider 提供按单条记录查询请求详情的能力（用于管理端查看请求头/Body/cURL）。
+type RequestLogDetailProvider interface {
+	// GetRequestLogDetail 按 id 获取请求日志详情；不存在返回 (nil, false)。
+	GetRequestLogDetail(apiType string, id int64) (*RequestLogRecord, bool)
+}
+
 // RequestLogStatsProvider 提供请求日志的计数与“清空/重置”能力。
 //
 // 说明：用于让“渠道编排”按 Key 显示累计请求数，并支持“重置统计”同时清空对应请求日志。

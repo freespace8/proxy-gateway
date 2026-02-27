@@ -301,6 +301,11 @@ export interface CircuitLogResponse {
 export interface RequestLogRecord {
   id: number
   requestId: string
+  requestMethod?: string
+  requestUrl?: string
+  requestHeaders?: Record<string, string>
+  requestBody?: string
+  requestBodyTruncated?: boolean
   channelIndex: number
   channelName: string
   keyMask: string
@@ -327,6 +332,10 @@ export interface RequestLogsResponse {
   totalRequests?: number
   limit: number
   offset: number
+}
+
+export interface RequestLogDetailResponse {
+  log: RequestLogRecord
 }
 
 export interface LiveRequest {
@@ -694,6 +703,10 @@ class ApiService {
 
   async getRequestLogs(apiType: ApiType, limit = 50, offset = 0): Promise<RequestLogsResponse> {
     return this.request(`/${apiType}/logs?limit=${limit}&offset=${offset}`)
+  }
+
+  async getRequestLogDetail(apiType: ApiType, id: number): Promise<RequestLogDetailResponse> {
+    return this.request(`/${apiType}/logs/${id}`)
   }
 
   async getLiveRequests(apiType: ApiType): Promise<LiveRequestsResponse> {

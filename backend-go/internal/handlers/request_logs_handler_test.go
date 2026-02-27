@@ -120,6 +120,65 @@ func TestRequestLogsHandler_FallbackToRequestPathAndQueryError(t *testing.T) {
 	}
 }
 
+func TestRequestLogsHandler_GetLogDetail(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	store := metrics.NewMemoryRequestLogStore(200)
+	if err := store.AddRequestLog(metrics.RequestLogRecord{
+		ID:                   123,
+		RequestID:            "req_123",
+		RequestMethod:        http.MethodPost,
+		RequestURL:           "/v1/messages",
+		RequestHeaders:       map[string]string{"Content-Type": "application/json"},
+		RequestBody:          `{"a":1}`,
+		RequestBodyTruncated: false,
+		ChannelIndex:         0,
+		ChannelName:          "c0",
+		KeyMask:              "***",
+		Timestamp:            time.Now(),
+		DurationMs:           10,
+		StatusCode:           200,
+		Success:              true,
+		Model:                "m",
+		APIType:              "messages",
+	}); err != nil {
+		t.Fatalf("AddRequestLog: %v", err)
+	}
+
+	h := NewRequestLogsHandler(store)
+	r := gin.New()
+	r.GET("/api/messages/logs/:id", h.GetLogDetail)
+
+	// valid
+	{
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/messages/logs/123", nil)
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+		}
+		var resp struct {
+			Log metrics.RequestLogRecord `json:"log"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if resp.Log.RequestID != "req_123" || resp.Log.RequestURL != "/v1/messages" || resp.Log.RequestBody == "" {
+			t.Fatalf("unexpected log: %+v", resp.Log)
+		}
+	}
+
+	// not found
+	{
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/messages/logs/999", nil)
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusNotFound {
+			t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+		}
+	}
+}
+
 func TestRequestLogsHandler_ParseHelpers(t *testing.T) {
 	if parseLimit("") != 50 {
 		t.Fatalf("parseLimit default")

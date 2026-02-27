@@ -4,25 +4,30 @@ import "time"
 
 // RequestLogRecord 请求日志记录（用于持久化和 API 返回）
 type RequestLogRecord struct {
-	ID                  int64     `json:"id"`
-	RequestID           string    `json:"requestId"`
-	ChannelIndex        int       `json:"channelIndex"`
-	ChannelName         string    `json:"channelName"`
-	KeyMask             string    `json:"keyMask"`
-	KeyID               string    `json:"keyId,omitempty"`
-	Timestamp           time.Time `json:"timestamp"`
-	DurationMs          int64     `json:"durationMs"`
-	StatusCode          int       `json:"statusCode"`
-	Success             bool      `json:"success"`
-	Model               string    `json:"model"`
-	ReasoningEffort     string    `json:"reasoningEffort,omitempty"`
-	InputTokens         int64     `json:"inputTokens"`
-	OutputTokens        int64     `json:"outputTokens"`
-	CacheCreationTokens int64     `json:"cacheCreationTokens"`
-	CacheReadTokens     int64     `json:"cacheReadTokens"`
-	CostCents           int64     `json:"costCents"`
-	ErrorMessage        string    `json:"errorMessage,omitempty"`
-	APIType             string    `json:"apiType"` // messages, responses, gemini
+	ID                   int64             `json:"id"`
+	RequestID            string            `json:"requestId"`
+	RequestMethod        string            `json:"requestMethod,omitempty"`
+	RequestURL           string            `json:"requestUrl,omitempty"`
+	RequestHeaders       map[string]string `json:"requestHeaders,omitempty"`
+	RequestBody          string            `json:"requestBody,omitempty"`
+	RequestBodyTruncated bool              `json:"requestBodyTruncated,omitempty"`
+	ChannelIndex         int               `json:"channelIndex"`
+	ChannelName          string            `json:"channelName"`
+	KeyMask              string            `json:"keyMask"`
+	KeyID                string            `json:"keyId,omitempty"`
+	Timestamp            time.Time         `json:"timestamp"`
+	DurationMs           int64             `json:"durationMs"`
+	StatusCode           int               `json:"statusCode"`
+	Success              bool              `json:"success"`
+	Model                string            `json:"model"`
+	ReasoningEffort      string            `json:"reasoningEffort,omitempty"`
+	InputTokens          int64             `json:"inputTokens"`
+	OutputTokens         int64             `json:"outputTokens"`
+	CacheCreationTokens  int64             `json:"cacheCreationTokens"`
+	CacheReadTokens      int64             `json:"cacheReadTokens"`
+	CostCents            int64             `json:"costCents"`
+	ErrorMessage         string            `json:"errorMessage,omitempty"`
+	APIType              string            `json:"apiType"` // messages, responses, gemini
 }
 
 // RequestLogsResponse API 响应

@@ -14,6 +14,10 @@ type RequestLogsHandler struct {
 	store metrics.RequestLogStore
 }
 
+type requestLogDetailResponse struct {
+	Log *metrics.RequestLogRecord `json:"log"`
+}
+
 // NewRequestLogsHandler 创建 handler
 func NewRequestLogsHandler(store metrics.RequestLogStore) *RequestLogsHandler {
 	return &RequestLogsHandler{store: store}
@@ -45,6 +49,15 @@ func (h *RequestLogsHandler) GetLogs(c *gin.Context) {
 		return
 	}
 
+	// 列表接口仅返回概要信息，避免传输/渲染大字段（请求头/Body/cURL 由详情接口获取）。
+	for i := range logs {
+		logs[i].RequestMethod = ""
+		logs[i].RequestURL = ""
+		logs[i].RequestHeaders = nil
+		logs[i].RequestBody = ""
+		logs[i].RequestBodyTruncated = false
+	}
+
 	var totalRequests int64
 	if stats, ok := h.store.(metrics.RequestLogStatsProvider); ok && stats != nil {
 		totalRequests = stats.GetTotalRequestCount(apiType)
@@ -57,6 +70,45 @@ func (h *RequestLogsHandler) GetLogs(c *gin.Context) {
 		Limit:         limit,
 		Offset:        offset,
 	})
+}
+
+// GetLogDetail 获取单条请求日志详情
+// GET /api/{messages|responses|gemini}/logs/:id
+func (h *RequestLogsHandler) GetLogDetail(c *gin.Context) {
+	if h == nil || h.store == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "请求日志未启用"})
+		return
+	}
+
+	apiType := apiTypeFromAdminLogsPath(c.FullPath())
+	if apiType == "" {
+		apiType = apiTypeFromAdminLogsPath(c.Request.URL.Path)
+	}
+	if apiType == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 apiType"})
+		return
+	}
+
+	rawID := strings.TrimSpace(c.Param("id"))
+	id, err := strconv.ParseInt(rawID, 10, 64)
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 id"})
+		return
+	}
+
+	detailProvider, ok := h.store.(metrics.RequestLogDetailProvider)
+	if !ok || detailProvider == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "请求详情未启用"})
+		return
+	}
+
+	logRecord, found := detailProvider.GetRequestLogDetail(apiType, id)
+	if !found || logRecord == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "日志不存在"})
+		return
+	}
+
+	c.JSON(http.StatusOK, requestLogDetailResponse{Log: logRecord})
 }
 
 func parseLimit(raw string) int {

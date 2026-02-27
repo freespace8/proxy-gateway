@@ -145,6 +145,7 @@ func (p *ResponsesProvider) ConvertToProviderRequest(
 
 	// 确保 Content-Type 正确
 	req.Header.Set("Content-Type", "application/json")
+	utils.ForceSU8CodexResponsesUserAgent(req.Header, targetURL)
 
 	return req, bodyBytes, nil
 }

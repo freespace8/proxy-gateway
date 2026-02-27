@@ -134,6 +134,26 @@ func TestResponsesHandler_SingleChannel_Success(t *testing.T) {
 	if !strings.Contains(w.Body.String(), `"id":"resp_1"`) {
 		t.Fatalf("unexpected body: %s", w.Body.String())
 	}
+
+	logs, total, err := requestLogs.QueryRequestLogs("responses", 10, 0)
+	if err != nil {
+		t.Fatalf("QueryRequestLogs: %v", err)
+	}
+	if total != 1 || len(logs) != 1 {
+		t.Fatalf("logs total=%d len=%d, want 1", total, len(logs))
+	}
+	if logs[0].RequestMethod != http.MethodPost {
+		t.Fatalf("request method=%q", logs[0].RequestMethod)
+	}
+	if logs[0].RequestURL != upstream.URL+"/v1/responses" {
+		t.Fatalf("request url=%q", logs[0].RequestURL)
+	}
+	if got := logs[0].RequestHeaders["Authorization"]; got != "Bearer rk1" {
+		t.Fatalf("request auth header=%q", got)
+	}
+	if !strings.Contains(logs[0].RequestBody, `"model":"gpt-4o"`) {
+		t.Fatalf("request body=%q", logs[0].RequestBody)
+	}
 }
 
 func TestResponsesHandler_OpenAI_NonStream_DoesNotDoubleCreateSession(t *testing.T) {

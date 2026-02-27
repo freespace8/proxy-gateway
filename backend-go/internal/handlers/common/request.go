@@ -21,6 +21,9 @@ import (
 
 var signatureFieldKey = []byte(`"signature"`)
 
+const contextKeyUpstreamRequestSnapshot = "__proxy_gateway_upstream_request_snapshot"
+const requestSnapshotMaxBodyBytes = 4 * 1024 * 1024 // 4MB
+
 // ReadRequestBody 读取并验证请求体大小
 // 返回: (bodyBytes, error)
 // 如果请求体过大，会自动返回 413 错误并排空剩余数据
@@ -148,6 +151,111 @@ func LogOriginalRequest(c *gin.Context, bodyBytes []byte, envCfg *config.EnvConf
 		}
 		log.Printf("[Request-OriginalHeaders] 原始请求头:\n%s", string(headersJSON))
 	}
+}
+
+type RequestSnapshot struct {
+	Method        string
+	URL           string
+	Headers       map[string]string
+	Body          string
+	BodyTruncated bool
+}
+
+// CaptureRequestSnapshot 提取“请求详情”所需信息（请求头/Body/URL），用于管理端排障。
+//
+// 注意：为保证可复现 cURL，请求头保留原值；Body 会按固定上限截断（避免内存膨胀）。
+func CaptureRequestSnapshot(c *gin.Context, bodyBytes []byte) RequestSnapshot {
+	if c == nil || c.Request == nil {
+		return RequestSnapshot{}
+	}
+
+	snapshot := RequestSnapshot{
+		Method: c.Request.Method,
+		URL:    c.Request.URL.RequestURI(),
+	}
+
+	snapshot.Headers = flattenHeaders(c.Request.Header)
+
+	if len(bodyBytes) == 0 {
+		return snapshot
+	}
+	if len(bodyBytes) > requestSnapshotMaxBodyBytes {
+		snapshot.BodyTruncated = true
+		bodyBytes = bodyBytes[:requestSnapshotMaxBodyBytes]
+	}
+	snapshot.Body = string(bodyBytes)
+	return snapshot
+}
+
+// CaptureUpstreamRequestSnapshot 从真正转发到上游的请求提取快照（包含完整 URL/Headers/Body）。
+func CaptureUpstreamRequestSnapshot(req *http.Request) RequestSnapshot {
+	if req == nil {
+		return RequestSnapshot{}
+	}
+
+	snapshot := RequestSnapshot{
+		Method: req.Method,
+	}
+	if req.URL != nil {
+		snapshot.URL = req.URL.String()
+	}
+
+	snapshot.Headers = flattenHeaders(req.Header)
+
+	if req.Body == nil {
+		return snapshot
+	}
+
+	bodyBytes, err := io.ReadAll(req.Body)
+	if err != nil {
+		return snapshot
+	}
+	req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+
+	if len(bodyBytes) > requestSnapshotMaxBodyBytes {
+		snapshot.BodyTruncated = true
+		bodyBytes = bodyBytes[:requestSnapshotMaxBodyBytes]
+	}
+	snapshot.Body = string(bodyBytes)
+	return snapshot
+}
+
+func flattenHeaders(headers http.Header) map[string]string {
+	if len(headers) == 0 {
+		return map[string]string{}
+	}
+
+	out := make(map[string]string, len(headers))
+	for key, values := range headers {
+		if len(values) == 0 {
+			continue
+		}
+		out[key] = values[0]
+		for i := 1; i < len(values); i++ {
+			out[key] += ", " + values[i]
+		}
+	}
+	return out
+}
+
+// SetUpstreamRequestSnapshot 在 gin 上下文中保存“上游请求快照”。
+func SetUpstreamRequestSnapshot(c *gin.Context, req *http.Request) {
+	if c == nil || req == nil {
+		return
+	}
+	c.Set(contextKeyUpstreamRequestSnapshot, CaptureUpstreamRequestSnapshot(req))
+}
+
+// ResolveRequestSnapshot 优先返回“上游请求快照”，否则回退到 fallback。
+func ResolveRequestSnapshot(c *gin.Context, fallback RequestSnapshot) RequestSnapshot {
+	if c != nil {
+		if v, ok := c.Get(contextKeyUpstreamRequestSnapshot); ok {
+			if snapshot, ok := v.(RequestSnapshot); ok {
+				return snapshot
+			}
+		}
+	}
+	return fallback
 }
 
 // AreAllKeysSuspended 检查渠道的所有 Key 是否都处于熔断状态

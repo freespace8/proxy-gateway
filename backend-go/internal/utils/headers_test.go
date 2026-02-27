@@ -217,3 +217,58 @@ func TestEnsureCompatibleUserAgent(t *testing.T) {
 		})
 	}
 }
+
+func TestForceSU8CodexResponsesUserAgent(t *testing.T) {
+	tests := []struct {
+		name      string
+		targetURL string
+		initialUA string
+		wantUA    string
+	}{
+		{
+			name:      "命中目标URL时强制覆盖",
+			targetURL: "https://www.su8.codes/codex/v1/responses",
+			initialUA: "CustomClient/1.0",
+			wantUA:    su8CodexResponsesUserAgent,
+		},
+		{
+			name:      "命中目标URL带query也覆盖",
+			targetURL: "https://www.su8.codes/codex/v1/responses?stream=true",
+			initialUA: "",
+			wantUA:    su8CodexResponsesUserAgent,
+		},
+		{
+			name:      "非目标URL保持不变",
+			targetURL: "https://www.su8.codes/codex/v1/responses/compact",
+			initialUA: "CustomClient/1.0",
+			wantUA:    "CustomClient/1.0",
+		},
+		{
+			name:      "非目标host保持不变",
+			targetURL: "https://api.example.com/codex/v1/responses",
+			initialUA: "CustomClient/1.0",
+			wantUA:    "CustomClient/1.0",
+		},
+		{
+			name:      "非https保持不变",
+			targetURL: "http://www.su8.codes/codex/v1/responses",
+			initialUA: "CustomClient/1.0",
+			wantUA:    "CustomClient/1.0",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			headers := http.Header{}
+			if tt.initialUA != "" {
+				headers.Set("User-Agent", tt.initialUA)
+			}
+
+			ForceSU8CodexResponsesUserAgent(headers, tt.targetURL)
+
+			if got := headers.Get("User-Agent"); got != tt.wantUA {
+				t.Fatalf("User-Agent=%q, want %q", got, tt.wantUA)
+			}
+		})
+	}
+}

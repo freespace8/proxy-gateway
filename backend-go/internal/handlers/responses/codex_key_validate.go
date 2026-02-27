@@ -281,6 +281,7 @@ func validateCodexKeyWithBaseURL(ctx context.Context, baseURL string, apiKey str
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+	utils.ForceSU8CodexResponsesUserAgent(httpReq.Header, targetURL)
 
 	resp, err := client.Do(httpReq)
 	if err != nil {

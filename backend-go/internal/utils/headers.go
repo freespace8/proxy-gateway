@@ -2,10 +2,13 @@ package utils
 
 import (
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 )
+
+const su8CodexResponsesUserAgent = "codex_cli_rs/0.105.0 (Mac OS 26.3.0; arm64) vscode/1.110.0-insider"
 
 // PrepareUpstreamHeaders 准备上游请求头（统一头部处理逻辑）
 // 保留原始请求头，移除代理相关头部，设置认证头
@@ -76,6 +79,24 @@ func EnsureCompatibleUserAgent(headers http.Header, serviceType string) {
 		if userAgent == "" || !strings.HasPrefix(strings.ToLower(userAgent), "claude-cli") {
 			headers.Set("User-Agent", "claude-cli/2.0.34 (external, cli)")
 		}
+	}
+}
+
+// ForceSU8CodexResponsesUserAgent 当目标 URL 命中 su8 codex responses 时强制覆盖 User-Agent。
+func ForceSU8CodexResponsesUserAgent(headers http.Header, targetURL string) {
+	if headers == nil {
+		return
+	}
+
+	u, err := url.Parse(strings.TrimSpace(targetURL))
+	if err != nil || u == nil {
+		return
+	}
+
+	host := strings.ToLower(u.Hostname())
+	path := strings.TrimSuffix(u.Path, "/")
+	if strings.EqualFold(u.Scheme, "https") && host == "www.su8.codes" && path == "/codex/v1/responses" {
+		headers.Set("User-Agent", su8CodexResponsesUserAgent)
 	}
 }
 

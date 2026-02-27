@@ -168,6 +168,26 @@ func TestMessagesHandler_SingleChannel_FailoverKeyThenSuccess(t *testing.T) {
 	if !strings.Contains(w.Body.String(), `"id":"msg_1"`) {
 		t.Fatalf("unexpected body: %s", w.Body.String())
 	}
+
+	logs, total, err := requestLogs.QueryRequestLogs("messages", 10, 0)
+	if err != nil {
+		t.Fatalf("QueryRequestLogs: %v", err)
+	}
+	if total != 1 || len(logs) != 1 {
+		t.Fatalf("logs total=%d len=%d, want 1", total, len(logs))
+	}
+	if logs[0].RequestMethod != http.MethodPost {
+		t.Fatalf("request method=%q", logs[0].RequestMethod)
+	}
+	if logs[0].RequestURL != upstream.URL+"/v1/messages" {
+		t.Fatalf("request url=%q", logs[0].RequestURL)
+	}
+	if got := logs[0].RequestHeaders["Authorization"]; got != "Bearer k-good" {
+		t.Fatalf("request auth header=%q", got)
+	}
+	if logs[0].RequestBody != reqBody {
+		t.Fatalf("request body=%q", logs[0].RequestBody)
+	}
 }
 
 func TestMessagesHandler_MultiChannel_FailoverToNextChannel(t *testing.T) {

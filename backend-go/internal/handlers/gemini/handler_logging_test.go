@@ -86,6 +86,18 @@ func TestGeminiHandler_WritesRequestLog_NonStream(t *testing.T) {
 	if logs[0].StatusCode != http.StatusOK || !logs[0].Success {
 		t.Fatalf("unexpected log status=%d success=%v err=%q", logs[0].StatusCode, logs[0].Success, logs[0].ErrorMessage)
 	}
+	if logs[0].RequestMethod != http.MethodPost {
+		t.Fatalf("request method=%q", logs[0].RequestMethod)
+	}
+	if logs[0].RequestURL != upstream.URL+"/v1beta/models/gemini-pro:generateContent" {
+		t.Fatalf("request url=%q", logs[0].RequestURL)
+	}
+	if got := logs[0].RequestHeaders["X-Goog-Api-Key"]; got != "k1" {
+		t.Fatalf("request x-goog-api-key=%q", got)
+	}
+	if !strings.Contains(logs[0].RequestBody, `"contents":[`) {
+		t.Fatalf("request body=%q", logs[0].RequestBody)
+	}
 
 	if live.Count() != 0 {
 		t.Fatalf("live requests not cleaned up, count=%d", live.Count())

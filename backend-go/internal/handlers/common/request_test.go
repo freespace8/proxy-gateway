@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -283,5 +284,97 @@ func TestRemoveEmptySignatures(t *testing.T) {
 				t.Fatalf("body should be unchanged, out=%s", string(out))
 			}
 		})
+	}
+}
+
+func TestCaptureUpstreamRequestSnapshot_FullURLHeadersAndBody(t *testing.T) {
+	req, err := http.NewRequest(http.MethodPost, "https://api.example.com/v1/messages?trace=1", bytes.NewBufferString(`{"a":1}`))
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer sk-test-123")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Add("Anthropic-Beta", "prompt-caching-2024-07-31")
+	req.Header.Add("Anthropic-Beta", "extended-thinking-2025-01-01")
+
+	snapshot := CaptureUpstreamRequestSnapshot(req)
+	if snapshot.Method != http.MethodPost {
+		t.Fatalf("method=%q", snapshot.Method)
+	}
+	if snapshot.URL != "https://api.example.com/v1/messages?trace=1" {
+		t.Fatalf("url=%q", snapshot.URL)
+	}
+	if got := snapshot.Headers["Authorization"]; got != "Bearer sk-test-123" {
+		t.Fatalf("authorization=%q", got)
+	}
+	if got := snapshot.Headers["Anthropic-Beta"]; got != "prompt-caching-2024-07-31, extended-thinking-2025-01-01" {
+		t.Fatalf("anthropic-beta=%q", got)
+	}
+	if snapshot.Body != `{"a":1}` {
+		t.Fatalf("body=%q", snapshot.Body)
+	}
+
+	restored, _ := io.ReadAll(req.Body)
+	if string(restored) != `{"a":1}` {
+		t.Fatalf("restored body=%q", string(restored))
+	}
+}
+
+func TestCaptureRequestSnapshot_KeepsSensitiveHeadersForDebug(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewBufferString(`{"x":1}`))
+	c.Request.Header.Set("Authorization", "Bearer client-token")
+	c.Request.Header.Set("x-api-key", "proxy-token")
+
+	snapshot := CaptureRequestSnapshot(c, []byte(`{"x":1}`))
+	if snapshot.Headers["Authorization"] != "Bearer client-token" {
+		t.Fatalf("authorization=%q", snapshot.Headers["Authorization"])
+	}
+	if snapshot.Headers["x-api-key"] != "proxy-token" {
+		t.Fatalf("x-api-key=%q", snapshot.Headers["x-api-key"])
+	}
+}
+
+func TestCaptureUpstreamRequestSnapshot_BodyLimitRaisedFrom64KB(t *testing.T) {
+	body := strings.Repeat("x", 128*1024)
+	req, err := http.NewRequest(http.MethodPost, "https://api.example.com/v1/messages", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+
+	snapshot := CaptureUpstreamRequestSnapshot(req)
+	if snapshot.BodyTruncated {
+		t.Fatalf("body should not be truncated at 128KB")
+	}
+	if len(snapshot.Body) != len(body) {
+		t.Fatalf("body len=%d want=%d", len(snapshot.Body), len(body))
+	}
+}
+
+func TestResolveRequestSnapshot_PrefersUpstreamSnapshot(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewBufferString(`{"x":1}`))
+	fallback := CaptureRequestSnapshot(c, []byte(`{"x":1}`))
+
+	upstreamReq, err := http.NewRequest(http.MethodPost, "https://api.example.com/v1/messages", bytes.NewBufferString(`{"y":2}`))
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	upstreamReq.Header.Set("x-api-key", "sk-real-456")
+	SetUpstreamRequestSnapshot(c, upstreamReq)
+
+	got := ResolveRequestSnapshot(c, fallback)
+	if got.URL != "https://api.example.com/v1/messages" {
+		t.Fatalf("url=%q", got.URL)
+	}
+	if got.Body != `{"y":2}` {
+		t.Fatalf("body=%q", got.Body)
+	}
+	if got.Headers["x-api-key"] != "sk-real-456" {
+		t.Fatalf("x-api-key=%q", got.Headers["x-api-key"])
 	}
 }

@@ -245,6 +245,11 @@ func main() {
 		apiGroup.GET("/settings/fuzzy-mode", handlers.GetFuzzyMode(cfgManager))
 		apiGroup.PUT("/settings/fuzzy-mode", handlers.SetFuzzyMode(cfgManager))
 
+		// 全局重定向设置
+		apiGroup.GET("/settings/model-mapping", handlers.GetGlobalModelMapping(cfgManager))
+		apiGroup.PUT("/settings/model-mapping", handlers.SetGlobalModelMapping(cfgManager))
+		apiGroup.GET("/settings/reasoning-mapping", handlers.GetGlobalReasoningMapping(cfgManager))
+		apiGroup.PUT("/settings/reasoning-mapping", handlers.SetGlobalReasoningMapping(cfgManager))
 		// 请求日志 API
 		requestLogsHandler := handlers.NewRequestLogsHandler(requestLogStore)
 		messagesAPI.GET("/logs", requestLogsHandler.GetLogs)

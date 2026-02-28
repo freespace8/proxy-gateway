@@ -78,6 +78,10 @@ type Config struct {
 	GeminiUpstream    []UpstreamConfig `json:"geminiUpstream"`
 	GeminiLoadBalance string           `json:"geminiLoadBalance"`
 
+	// 全局重定向配置（优先级低于单渠道配置）
+	GlobalModelMapping     map[string]string `json:"globalModelMapping,omitempty"`
+	GlobalReasoningMapping map[string]string `json:"globalReasoningMapping,omitempty"`
+
 	// Fuzzy 模式：启用时模糊处理错误，所有非 2xx 错误都尝试 failover
 	FuzzyModeEnabled bool `json:"fuzzyModeEnabled"`
 }
@@ -132,6 +136,19 @@ func (cm *ConfigManager) GetConfig() Config {
 		cloned.GeminiUpstream = make([]UpstreamConfig, len(cm.config.GeminiUpstream))
 		for i := range cm.config.GeminiUpstream {
 			cloned.GeminiUpstream[i] = *cm.config.GeminiUpstream[i].Clone()
+		}
+	}
+	// 深拷贝全局映射配置
+	if cm.config.GlobalModelMapping != nil {
+		cloned.GlobalModelMapping = make(map[string]string, len(cm.config.GlobalModelMapping))
+		for source, target := range cm.config.GlobalModelMapping {
+			cloned.GlobalModelMapping[source] = target
+		}
+	}
+	if cm.config.GlobalReasoningMapping != nil {
+		cloned.GlobalReasoningMapping = make(map[string]string, len(cm.config.GlobalReasoningMapping))
+		for source, target := range cm.config.GlobalReasoningMapping {
+			cloned.GlobalReasoningMapping[source] = target
 		}
 	}
 

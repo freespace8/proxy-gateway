@@ -1,6 +1,8 @@
 package converters
 
 import (
+	"strings"
+
 	"github.com/BenedictKing/claude-proxy/internal/session"
 	"github.com/BenedictKing/claude-proxy/internal/types"
 )
@@ -9,6 +11,43 @@ import (
 
 // OpenAIChatConverter 实现 Responses → OpenAI Chat Completions 转换
 type OpenAIChatConverter struct{}
+
+func mapReasoningEffortToOpenAI(effort string) string {
+	switch strings.ToLower(strings.TrimSpace(effort)) {
+	case "none":
+		return "none"
+	case "auto":
+		return "auto"
+	case "minimal", "low":
+		return "low"
+	case "medium":
+		return "medium"
+	case "high":
+		return "high"
+	case "xhigh":
+		return "xhigh"
+	default:
+		return "auto"
+	}
+}
+
+func extractResponsesReasoningEffort(req *types.ResponsesRequest) string {
+	if req == nil {
+		return ""
+	}
+
+	effort := strings.TrimSpace(req.ReasoningEffort)
+	if effort == "" && req.Reasoning != nil {
+		if raw, ok := req.Reasoning["effort"].(string); ok {
+			effort = strings.TrimSpace(raw)
+		}
+	}
+	if effort == "" {
+		return ""
+	}
+
+	return mapReasoningEffortToOpenAI(effort)
+}
 
 // ToProviderRequest 将 Responses 请求转换为 OpenAI Chat Completions 格式
 func (c *OpenAIChatConverter) ToProviderRequest(sess *session.Session, req *types.ResponsesRequest) (interface{}, error) {
@@ -50,7 +89,9 @@ func (c *OpenAIChatConverter) ToProviderRequest(sess *session.Session, req *type
 	if req.StreamOptions != nil {
 		openaiReq["stream_options"] = req.StreamOptions
 	}
-
+	if effort := extractResponsesReasoningEffort(req); effort != "" {
+		openaiReq["reasoning_effort"] = effort
+	}
 	return openaiReq, nil
 }
 

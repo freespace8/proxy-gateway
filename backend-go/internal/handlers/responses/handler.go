@@ -302,11 +302,13 @@ func (h *Handler) Handle(c *gin.Context) {
 
 	// 多槽位模式：(渠道,key) 同层级负载均衡，并按 routingKey 做粘性
 	isMultiSlot := channelScheduler.IsMultiSlotMode(true) // true = isResponses
+	globalModelMapping := cfgManager.GetGlobalModelMapping()
+	globalReasoningMapping := cfgManager.GetGlobalReasoningMapping()
 
 	if isMultiSlot {
-		handleMultiChannel(c, envCfg, cfgManager, channelScheduler, h.circuitLogStore, sessionManager, bodyBytes, responsesReq, routingKey, startTime, billingHandler, billingCtx, reqCtx)
+		handleMultiChannel(c, envCfg, cfgManager, channelScheduler, h.circuitLogStore, sessionManager, bodyBytes, responsesReq, routingKey, startTime, billingHandler, billingCtx, reqCtx, globalModelMapping, globalReasoningMapping)
 	} else {
-		handleSingleChannel(c, envCfg, cfgManager, channelScheduler, h.circuitLogStore, sessionManager, bodyBytes, responsesReq, startTime, billingHandler, billingCtx, reqCtx)
+		handleSingleChannel(c, envCfg, cfgManager, channelScheduler, h.circuitLogStore, sessionManager, bodyBytes, responsesReq, startTime, billingHandler, billingCtx, reqCtx, globalModelMapping, globalReasoningMapping)
 	}
 }
 
@@ -325,6 +327,8 @@ func handleMultiChannel(
 	billingHandler *billing.Handler,
 	billingCtx *billing.RequestContext,
 	reqCtx *requestLogContext,
+	globalModelMapping map[string]string,
+	globalReasoningMapping map[string]string,
 ) {
 	failedSlots := make(map[string]bool)
 	var lastError error
@@ -349,7 +353,7 @@ func handleMultiChannel(
 		if reqCtx != nil {
 			reqCtx.channelIndex = channelIndex
 			reqCtx.channelName = upstream.Name
-			mappedModel := config.RedirectModel(responsesReq.Model, upstream)
+			mappedModel := config.RedirectModelWithGlobal(responsesReq.Model, upstream, globalModelMapping)
 			if mappedModel != responsesReq.Model {
 				reqCtx.model = fmt.Sprintf("%s -> %s", responsesReq.Model, mappedModel)
 			} else {
@@ -365,7 +369,7 @@ func handleMultiChannel(
 
 		upstreamOneKey := upstream.Clone()
 		upstreamOneKey.APIKeys = []string{selection.APIKey}
-		success, successKey, _, failoverErr, usage := tryChannelWithAllKeys(c, envCfg, cfgManager, channelScheduler, circuitLogStore, sessionManager, upstreamOneKey, channelIndex, bodyBytes, responsesReq, startTime, billingHandler, billingCtx, reqCtx)
+		success, successKey, _, failoverErr, usage := tryChannelWithAllKeys(c, envCfg, cfgManager, channelScheduler, circuitLogStore, sessionManager, upstreamOneKey, channelIndex, bodyBytes, responsesReq, startTime, billingHandler, billingCtx, reqCtx, globalModelMapping, globalReasoningMapping)
 
 		if success {
 			// successKey 为空表示请求方取消导致的提前退出：不记录成功/亲和，也不再继续。
@@ -373,7 +377,7 @@ func handleMultiChannel(
 				return
 			}
 			if successKey != "" {
-				mappedModel := config.RedirectModel(responsesReq.Model, upstreamOneKey)
+				mappedModel := config.RedirectModelWithGlobal(responsesReq.Model, upstreamOneKey, globalModelMapping)
 				var costCents int64
 				if billingHandler != nil && usage != nil {
 					costCents = billingHandler.CalculateCost(mappedModel, usage.InputTokens, usage.OutputTokens, usage.CacheCreationInputTokens, usage.CacheReadInputTokens)
@@ -431,6 +435,8 @@ func tryChannelWithAllKeys(
 	billingHandler *billing.Handler,
 	billingCtx *billing.RequestContext,
 	reqCtx *requestLogContext,
+	globalModelMapping map[string]string,
+	globalReasoningMapping map[string]string,
 ) (bool, string, int, *common.FailoverError, *types.Usage) {
 	enabledKeys := upstream.GetEnabledAPIKeys()
 	if len(enabledKeys) == 0 {
@@ -499,7 +505,9 @@ func tryChannelWithAllKeys(
 			// 使用深拷贝避免并发修改问题
 			upstreamCopy := upstream.Clone()
 			upstreamCopy.BaseURL = currentBaseURL
-			mappedModel := config.RedirectModel(responsesReq.Model, upstreamCopy)
+			mappedModel := config.RedirectModelWithGlobal(responsesReq.Model, upstreamCopy, globalModelMapping)
+			// 固定为精确映射，避免 provider 侧再次模糊匹配改变优先级。
+			upstreamCopy.ModelMapping = map[string]string{responsesReq.Model: mappedModel}
 			if reqCtx != nil {
 				if mappedModel != responsesReq.Model {
 					reqCtx.model = fmt.Sprintf("%s -> %s", responsesReq.Model, mappedModel)
@@ -514,6 +522,7 @@ func tryChannelWithAllKeys(
 
 			if c != nil {
 				c.Set(providers.ContextKeyResponsesUpstreamReasoningEffort, "")
+				c.Set(providers.ContextKeyResponsesGlobalReasoningMapping, globalReasoningMapping)
 			}
 			providerReq, _, err := provider.ConvertToProviderRequest(c, upstreamCopy, apiKey)
 
@@ -644,6 +653,8 @@ func handleSingleChannel(
 	billingHandler *billing.Handler,
 	billingCtx *billing.RequestContext,
 	reqCtx *requestLogContext,
+	globalModelMapping map[string]string,
+	globalReasoningMapping map[string]string,
 ) {
 	upstream, err := cfgManager.GetCurrentResponsesUpstream()
 	if err != nil {
@@ -679,7 +690,7 @@ func handleSingleChannel(
 	if reqCtx != nil {
 		reqCtx.channelIndex = 0
 		reqCtx.channelName = upstream.Name
-		mappedModel := config.RedirectModel(responsesReq.Model, upstream)
+		mappedModel := config.RedirectModelWithGlobal(responsesReq.Model, upstream, globalModelMapping)
 		if mappedModel != responsesReq.Model {
 			reqCtx.model = fmt.Sprintf("%s -> %s", responsesReq.Model, mappedModel)
 		} else {
@@ -744,7 +755,9 @@ func handleSingleChannel(
 			// 使用深拷贝避免并发修改问题
 			upstreamCopy := upstream.Clone()
 			upstreamCopy.BaseURL = currentBaseURL
-			mappedModel := config.RedirectModel(responsesReq.Model, upstreamCopy)
+			mappedModel := config.RedirectModelWithGlobal(responsesReq.Model, upstreamCopy, globalModelMapping)
+			// 固定为精确映射，避免 provider 侧再次模糊匹配改变优先级。
+			upstreamCopy.ModelMapping = map[string]string{responsesReq.Model: mappedModel}
 			if reqCtx != nil {
 				reqCtx.model = mappedModel
 				reqCtx.updateLive()
@@ -755,6 +768,7 @@ func handleSingleChannel(
 
 			if c != nil {
 				c.Set(providers.ContextKeyResponsesUpstreamReasoningEffort, "")
+				c.Set(providers.ContextKeyResponsesGlobalReasoningMapping, globalReasoningMapping)
 			}
 			providerReq, _, err := provider.ConvertToProviderRequest(c, upstreamCopy, apiKey)
 

@@ -22,6 +22,9 @@ import (
 // 由 ResponsesProvider 写入，供 handler 在请求监控/请求日志中展示。
 const ContextKeyResponsesUpstreamReasoningEffort = "__proxy_gateway_responses_upstream_reasoning_effort"
 
+// ContextKeyResponsesGlobalReasoningMapping 存储全局思考重定向映射
+const ContextKeyResponsesGlobalReasoningMapping = "__proxy_gateway_responses_global_reasoning_mapping"
+
 // ResponsesProvider Responses API 提供商
 type ResponsesProvider struct {
 	SessionManager *session.SessionManager
@@ -44,7 +47,7 @@ func (p *ResponsesProvider) ConvertToProviderRequest(
 
 	// 2. 使用转换器工厂创建转换器
 	converter := converters.NewConverter(upstream.ServiceType)
-
+	globalReasoningMapping := getResponsesGlobalReasoningMapping(c)
 	// 3. 判断是否为透传模式
 	if _, ok := converter.(*converters.ResponsesPassthroughConverter); ok {
 		// [Mode-Passthrough] 透传模式：使用 map 保留所有字段
@@ -57,14 +60,27 @@ func (p *ResponsesProvider) ConvertToProviderRequest(
 		if model, ok := reqMap["model"].(string); ok {
 			reqMap["model"] = config.RedirectModel(model, upstream)
 		}
+		// 应用全局思考重定向（若有）
+		redirectResponsesReasoningEffort(reqMap, globalReasoningMapping)
 		// 兼容特定模型的字段约束（例如 gpt-5.2 不支持 reasoning.effort=minimal）
 		normalizeResponsesReasoningEffort(reqMap)
 
 		providerReq = reqMap
 	} else {
-		// [Mode-Convert] 非透传模式：保持原有逻辑
+		// [Mode-Convert] 非透传模式：在进入结构体转换前统一处理思考映射
+		var reqMap map[string]interface{}
+		if err := json.Unmarshal(bodyBytes, &reqMap); err != nil {
+			return nil, bodyBytes, fmt.Errorf("解析 Responses 请求失败: %w", err)
+		}
+		redirectResponsesReasoningEffort(reqMap, globalReasoningMapping)
+		normalizeResponsesReasoningEffort(reqMap)
+		normalizedBodyBytes, err := utils.MarshalJSONNoEscape(reqMap)
+		if err != nil {
+			return nil, bodyBytes, fmt.Errorf("标准化 Responses 请求失败: %w", err)
+		}
+
 		var responsesReq types.ResponsesRequest
-		if err := json.Unmarshal(bodyBytes, &responsesReq); err != nil {
+		if err := json.Unmarshal(normalizedBodyBytes, &responsesReq); err != nil {
 			return nil, bodyBytes, fmt.Errorf("解析 Responses 请求失败: %w", err)
 		}
 
@@ -148,6 +164,37 @@ func (p *ResponsesProvider) ConvertToProviderRequest(
 	utils.ForceSU8CodexResponsesUserAgent(req.Header, targetURL)
 
 	return req, bodyBytes, nil
+}
+
+func getResponsesGlobalReasoningMapping(c *gin.Context) map[string]string {
+	if c == nil {
+		return nil
+	}
+	v, ok := c.Get(ContextKeyResponsesGlobalReasoningMapping)
+	if !ok {
+		return nil
+	}
+	mapping, ok := v.(map[string]string)
+	if !ok || len(mapping) == 0 {
+		return nil
+	}
+	return mapping
+}
+
+func redirectResponsesReasoningEffort(reqMap map[string]interface{}, mapping map[string]string) {
+	if len(mapping) == 0 || reqMap == nil {
+		return
+	}
+
+	if reasoningRaw, ok := reqMap["reasoning"].(map[string]interface{}); ok && reasoningRaw != nil {
+		if effort, ok := reasoningRaw["effort"].(string); ok && effort != "" {
+			reasoningRaw["effort"] = config.RedirectReasoningEffort(effort, mapping)
+		}
+	}
+
+	if effort, ok := reqMap["reasoning_effort"].(string); ok && effort != "" {
+		reqMap["reasoning_effort"] = config.RedirectReasoningEffort(effort, mapping)
+	}
 }
 
 func normalizeResponsesReasoningEffort(reqMap map[string]interface{}) {

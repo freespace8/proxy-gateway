@@ -332,8 +332,9 @@ func TestCaptureRequestSnapshot_KeepsSensitiveHeadersForDebug(t *testing.T) {
 	if snapshot.Headers["Authorization"] != "Bearer client-token" {
 		t.Fatalf("authorization=%q", snapshot.Headers["Authorization"])
 	}
-	if snapshot.Headers["x-api-key"] != "proxy-token" {
-		t.Fatalf("x-api-key=%q", snapshot.Headers["x-api-key"])
+	apiKeyHeader := http.CanonicalHeaderKey("x-api-key")
+	if snapshot.Headers[apiKeyHeader] != "proxy-token" {
+		t.Fatalf("x-api-key=%q", snapshot.Headers[apiKeyHeader])
 	}
 }
 
@@ -374,7 +375,8 @@ func TestResolveRequestSnapshot_PrefersUpstreamSnapshot(t *testing.T) {
 	if got.Body != `{"y":2}` {
 		t.Fatalf("body=%q", got.Body)
 	}
-	if got.Headers["x-api-key"] != "sk-real-456" {
-		t.Fatalf("x-api-key=%q", got.Headers["x-api-key"])
+	apiKeyHeader := http.CanonicalHeaderKey("x-api-key")
+	if got.Headers[apiKeyHeader] != "sk-real-456" {
+		t.Fatalf("x-api-key=%q", got.Headers[apiKeyHeader])
 	}
 }

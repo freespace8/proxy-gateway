@@ -60,42 +60,75 @@ func (e *ConfigError) Error() string {
 	return e.Message
 }
 
-// ============== 模型重定向 ==============
+// ============== 模型与思考重定向 ==============
 
-// RedirectModel 模型重定向
-func RedirectModel(model string, upstream *UpstreamConfig) string {
-	if upstream.ModelMapping == nil || len(upstream.ModelMapping) == 0 {
-		return model
+type mappingPair struct {
+	source string
+	target string
+}
+
+func redirectByMapping(value string, mapping map[string]string) (string, bool) {
+	if len(mapping) == 0 {
+		return value, false
+	}
+
+	if value == "" {
+		return value, false
 	}
 
 	// 直接匹配（精确匹配优先）
-	if mapped, ok := upstream.ModelMapping[model]; ok {
-		return mapped
+	if mapped, ok := mapping[value]; ok {
+		return mapped, true
 	}
 
-	// 模糊匹配：按源模型长度从长到短排序，确保最长匹配优先
-	// 例如：同时配置 "codex" 和 "gpt-5.1-codex" 时，"gpt-5.1-codex" 应该先匹配
-	type mapping struct {
-		source string
-		target string
+	// 模糊匹配：按源值长度从长到短排序，确保最长匹配优先
+	pairs := make([]mappingPair, 0, len(mapping))
+	for source, target := range mapping {
+		if source == "" {
+			continue
+		}
+		pairs = append(pairs, mappingPair{source: source, target: target})
 	}
-	mappings := make([]mapping, 0, len(upstream.ModelMapping))
-	for source, target := range upstream.ModelMapping {
-		mappings = append(mappings, mapping{source, target})
-	}
-	// 按源模型长度降序排序
-	sort.Slice(mappings, func(i, j int) bool {
-		return len(mappings[i].source) > len(mappings[j].source)
+	sort.Slice(pairs, func(i, j int) bool {
+		if len(pairs[i].source) != len(pairs[j].source) {
+			return len(pairs[i].source) > len(pairs[j].source)
+		}
+		return pairs[i].source < pairs[j].source
 	})
 
-	// 按排序后的顺序进行模糊匹配
-	for _, m := range mappings {
-		if strings.Contains(model, m.source) || strings.Contains(m.source, model) {
-			return m.target
+	for _, pair := range pairs {
+		if strings.Contains(value, pair.source) || strings.Contains(pair.source, value) {
+			return pair.target, true
 		}
 	}
 
-	return model
+	return value, false
+}
+
+// RedirectModel 模型重定向（仅单渠道映射）
+func RedirectModel(model string, upstream *UpstreamConfig) string {
+	if upstream == nil {
+		return model
+	}
+	redirected, _ := redirectByMapping(model, upstream.ModelMapping)
+	return redirected
+}
+
+// RedirectModelWithGlobal 模型重定向（单渠道优先，全局回退）
+func RedirectModelWithGlobal(model string, upstream *UpstreamConfig, globalMapping map[string]string) string {
+	if upstream != nil {
+		if redirected, matched := redirectByMapping(model, upstream.ModelMapping); matched {
+			return redirected
+		}
+	}
+	redirected, _ := redirectByMapping(model, globalMapping)
+	return redirected
+}
+
+// RedirectReasoningEffort 思考等级重定向
+func RedirectReasoningEffort(reasoningEffort string, reasoningMapping map[string]string) string {
+	redirected, _ := redirectByMapping(reasoningEffort, reasoningMapping)
+	return redirected
 }
 
 // ============== 渠道状态与优先级辅助函数 ==============

@@ -576,12 +576,12 @@ func TestBuildProviderRequest_CoversServiceTypes(t *testing.T) {
 	}
 
 	up := &config.UpstreamConfig{Name: "u", BaseURL: "http://example.com", ServiceType: "claude"}
-	if _, err := buildProviderRequest(ctx, up, "http://example.com", "k", req, "gemini-pro", false); err != nil {
+	if _, err := buildProviderRequest(ctx, up, "http://example.com", "k", req, "gemini-pro", false, nil); err != nil {
 		t.Fatalf("claude buildProviderRequest: %v", err)
 	}
 
 	up2 := &config.UpstreamConfig{Name: "u", BaseURL: "http://example.com", ServiceType: "openai"}
-	if _, err := buildProviderRequest(ctx, up2, "http://example.com", "k", req, "gemini-pro", false); err != nil {
+	if _, err := buildProviderRequest(ctx, up2, "http://example.com", "k", req, "gemini-pro", false, nil); err != nil {
 		t.Fatalf("openai buildProviderRequest: %v", err)
 	}
 }

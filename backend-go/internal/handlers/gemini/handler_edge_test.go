@@ -150,7 +150,7 @@ func TestBuildProviderRequest_SetsURLAndAuthHeaders(t *testing.T) {
 
 	t.Run("gemini non-stream", func(t *testing.T) {
 		up := &config.UpstreamConfig{ServiceType: "gemini"}
-		req, err := buildProviderRequest(c, up, "http://example.com", "k", reqBody, "gemini-pro", false)
+		req, err := buildProviderRequest(c, up, "http://example.com", "k", reqBody, "gemini-pro", false, nil)
 		if err != nil {
 			t.Fatalf("err=%v", err)
 		}
@@ -164,7 +164,7 @@ func TestBuildProviderRequest_SetsURLAndAuthHeaders(t *testing.T) {
 
 	t.Run("gemini stream includes alt=sse", func(t *testing.T) {
 		up := &config.UpstreamConfig{ServiceType: "gemini"}
-		req, err := buildProviderRequest(c, up, "http://example.com", "k", reqBody, "gemini-pro", true)
+		req, err := buildProviderRequest(c, up, "http://example.com", "k", reqBody, "gemini-pro", true, nil)
 		if err != nil {
 			t.Fatalf("err=%v", err)
 		}
@@ -175,7 +175,7 @@ func TestBuildProviderRequest_SetsURLAndAuthHeaders(t *testing.T) {
 
 	t.Run("claude sets anthropic version and bearer", func(t *testing.T) {
 		up := &config.UpstreamConfig{ServiceType: "claude"}
-		req, err := buildProviderRequest(c, up, "http://example.com", "k", reqBody, "claude-3", false)
+		req, err := buildProviderRequest(c, up, "http://example.com", "k", reqBody, "claude-3", false, nil)
 		if err != nil {
 			t.Fatalf("err=%v", err)
 		}
@@ -189,7 +189,7 @@ func TestBuildProviderRequest_SetsURLAndAuthHeaders(t *testing.T) {
 
 	t.Run("openai uses bearer", func(t *testing.T) {
 		up := &config.UpstreamConfig{ServiceType: "openai"}
-		req, err := buildProviderRequest(c, up, "http://example.com", "k", reqBody, "gpt-4o", false)
+		req, err := buildProviderRequest(c, up, "http://example.com", "k", reqBody, "gpt-4o", false, nil)
 		if err != nil {
 			t.Fatalf("err=%v", err)
 		}
@@ -198,6 +198,27 @@ func TestBuildProviderRequest_SetsURLAndAuthHeaders(t *testing.T) {
 		}
 		if !strings.HasPrefix(req.Header.Get("Authorization"), "Bearer ") {
 			t.Fatalf("auth=%q", req.Header.Get("Authorization"))
+		}
+	})
+	t.Run("global mapping fallback works", func(t *testing.T) {
+		up := &config.UpstreamConfig{ServiceType: "gemini", ModelMapping: map[string]string{"other": "x"}}
+		req, err := buildProviderRequest(c, up, "http://example.com", "k", reqBody, "gemini-pro", false, map[string]string{"gemini-pro": "global-model"})
+		if err != nil {
+			t.Fatalf("err=%v", err)
+		}
+		if !strings.Contains(req.URL.String(), "/v1beta/models/global-model:generateContent") {
+			t.Fatalf("url=%q", req.URL.String())
+		}
+	})
+
+	t.Run("channel fuzzy mapping keeps priority over global exact", func(t *testing.T) {
+		up := &config.UpstreamConfig{ServiceType: "gemini", ModelMapping: map[string]string{"gemini": "channel-fuzzy"}}
+		req, err := buildProviderRequest(c, up, "http://example.com", "k", reqBody, "gemini-pro", false, map[string]string{"gemini-pro": "global-exact"})
+		if err != nil {
+			t.Fatalf("err=%v", err)
+		}
+		if !strings.Contains(req.URL.String(), "/v1beta/models/channel-fuzzy:generateContent") {
+			t.Fatalf("url=%q", req.URL.String())
 		}
 	})
 }

@@ -247,6 +247,32 @@
             </v-btn>
 
             <v-btn
+              color="secondary"
+              size="large"
+              prepend-icon="mdi-swap-horizontal"
+              variant="tonal"
+              :loading="globalModelMappingLoading || globalModelMappingSaving"
+              :disabled="globalModelMappingLoading || globalModelMappingSaving"
+              class="action-btn"
+              @click="openGlobalModelMappingDialog"
+            >
+              模型重定向
+            </v-btn>
+
+            <v-btn
+              color="teal"
+              size="large"
+              prepend-icon="mdi-brain"
+              variant="tonal"
+              :loading="globalReasoningMappingLoading || globalReasoningMappingSaving"
+              :disabled="globalReasoningMappingLoading || globalReasoningMappingSaving"
+              class="action-btn"
+              @click="openGlobalReasoningMappingDialog"
+            >
+              思考重定向
+            </v-btn>
+
+            <v-btn
               color="info"
               size="large"
               prepend-icon="mdi-speedometer"
@@ -308,6 +334,36 @@
       @save="saveChannel"
     />
 
+    <GlobalMappingDialog
+      v-model:show="showGlobalModelMappingDialog"
+      title="模型重定向"
+      description="配置全局模型重定向规则，单个渠道中的模型重定向优先级更高。"
+      source-label="源模型"
+      target-label="目标模型"
+      source-placeholder="例如 gpt-5"
+      target-placeholder="例如 gpt-5.2"
+      icon="mdi-swap-horizontal"
+      :mappings="globalModelMapping"
+      :loading="globalModelMappingLoading"
+      :saving="globalModelMappingSaving"
+      @save="saveGlobalModelMapping"
+    />
+
+    <GlobalMappingDialog
+      v-model:show="showGlobalReasoningMappingDialog"
+      title="思考重定向"
+      description="配置全局思考等级重定向，例如 low -> xhigh。"
+      source-label="原思考等级"
+      target-label="目标思考等级"
+      source-placeholder="例如 low"
+      target-placeholder="例如 xhigh"
+      icon="mdi-brain"
+      :mappings="globalReasoningMapping"
+      :loading="globalReasoningMappingLoading"
+      :saving="globalReasoningMappingSaving"
+      @save="saveGlobalReasoningMapping"
+    />
+
     <!-- 添加API密钥对话框 -->
     <v-dialog v-model="dialogStore.showAddKeyModal" max-width="500">
       <v-card rounded="lg">
@@ -364,6 +420,7 @@ import { usePreferencesStore } from './stores/preferences'
 import { useDialogStore } from './stores/dialog'
 import { useSystemStore } from './stores/system'
 import AddChannelModal from './components/AddChannelModal.vue'
+import GlobalMappingDialog from './components/GlobalMappingDialog.vue'
 import GlobalStatsChart from './components/GlobalStatsChart.vue'
 import { useAppTheme } from './composables/useTheme'
 
@@ -417,6 +474,14 @@ interface Toast {
 const toasts = ref<Toast[]>([])
 let toastId = 0
 
+const showGlobalModelMappingDialog = ref(false)
+const showGlobalReasoningMappingDialog = ref(false)
+const globalModelMapping = ref<Record<string, string>>({})
+const globalReasoningMapping = ref<Record<string, string>>({})
+const globalModelMappingLoading = ref(false)
+const globalReasoningMappingLoading = ref(false)
+const globalModelMappingSaving = ref(false)
+const globalReasoningMappingSaving = ref(false)
 // Toast工具函数
 const getToastColor = (type: string) => {
   const colorMap: Record<string, string> = {
@@ -504,6 +569,80 @@ const deleteChannel = async (channelId: number) => {
 
 const openAddChannelModal = () => {
   dialogStore.openAddChannelModal()
+}
+
+const openGlobalModelMappingDialog = async () => {
+  if (globalModelMappingLoading.value || globalModelMappingSaving.value) return
+  globalModelMappingLoading.value = true
+  try {
+    const { globalModelMapping: mappings } = await api.getGlobalModelMapping()
+    globalModelMapping.value = { ...(mappings || {}) }
+    showGlobalModelMappingDialog.value = true
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 401) {
+      handleAuthError(error)
+      return
+    }
+    showToast(`加载全局模型重定向失败: ${error instanceof Error ? error.message : '未知错误'}`, 'error')
+  } finally {
+    globalModelMappingLoading.value = false
+  }
+}
+
+const openGlobalReasoningMappingDialog = async () => {
+  if (globalReasoningMappingLoading.value || globalReasoningMappingSaving.value) return
+  globalReasoningMappingLoading.value = true
+  try {
+    const { globalReasoningMapping: mappings } = await api.getGlobalReasoningMapping()
+    globalReasoningMapping.value = { ...(mappings || {}) }
+    showGlobalReasoningMappingDialog.value = true
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 401) {
+      handleAuthError(error)
+      return
+    }
+    showToast(`加载全局思考重定向失败: ${error instanceof Error ? error.message : '未知错误'}`, 'error')
+  } finally {
+    globalReasoningMappingLoading.value = false
+  }
+}
+
+const saveGlobalModelMapping = async (mappings: Record<string, string>) => {
+  if (globalModelMappingSaving.value) return
+  globalModelMappingSaving.value = true
+  try {
+    await api.setGlobalModelMapping(mappings)
+    globalModelMapping.value = { ...mappings }
+    showGlobalModelMappingDialog.value = false
+    showToast('全局模型重定向保存成功', 'success')
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 401) {
+      handleAuthError(error)
+      return
+    }
+    showToast(`保存全局模型重定向失败: ${error instanceof Error ? error.message : '未知错误'}`, 'error')
+  } finally {
+    globalModelMappingSaving.value = false
+  }
+}
+
+const saveGlobalReasoningMapping = async (mappings: Record<string, string>) => {
+  if (globalReasoningMappingSaving.value) return
+  globalReasoningMappingSaving.value = true
+  try {
+    await api.setGlobalReasoningMapping(mappings)
+    globalReasoningMapping.value = { ...mappings }
+    showGlobalReasoningMappingDialog.value = false
+    showToast('全局思考重定向保存成功', 'success')
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 401) {
+      handleAuthError(error)
+      return
+    }
+    showToast(`保存全局思考重定向失败: ${error instanceof Error ? error.message : '未知错误'}`, 'error')
+  } finally {
+    globalReasoningMappingSaving.value = false
+  }
 }
 
 const _openAddKeyModal = (channelId: number) => {

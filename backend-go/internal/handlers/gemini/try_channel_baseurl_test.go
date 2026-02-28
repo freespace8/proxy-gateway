@@ -109,6 +109,7 @@ func TestTryChannelWithAllKeys_BaseURLFailover(t *testing.T) {
 		false,
 		time.Now(),
 		nil,
+		nil,
 	)
 
 	if !ok || failoverErr != nil {

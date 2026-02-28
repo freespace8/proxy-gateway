@@ -94,7 +94,7 @@ func TestBuildProviderRequest_ServiceTypesAndAuthHeaders(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			up := &config.UpstreamConfig{ServiceType: tc.upType}
 
-			req, err := buildProviderRequest(c, up, "https://up.example/", tc.apiKey, geminiReq, "gemini-pro", tc.isStream)
+			req, err := buildProviderRequest(c, up, "https://up.example/", tc.apiKey, geminiReq, "gemini-pro", tc.isStream, nil)
 			if err != nil {
 				t.Fatalf("buildProviderRequest: %v", err)
 			}

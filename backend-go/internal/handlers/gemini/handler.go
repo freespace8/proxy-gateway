@@ -249,11 +249,12 @@ func (h *Handler) Handle(c *gin.Context) {
 
 	// 多槽位模式：(渠道,key) 同层级负载均衡，并按 prompt_cache_key 做粘性
 	isMultiSlot := channelScheduler.IsMultiSlotModeGemini()
+	globalModelMapping := cfgManager.GetGlobalModelMapping()
 
 	if isMultiSlot {
-		handleMultiChannel(c, envCfg, cfgManager, channelScheduler, h.circuitLogStore, bodyBytes, &geminiReq, model, isStream, userID, startTime, reqCtx)
+		handleMultiChannel(c, envCfg, cfgManager, channelScheduler, h.circuitLogStore, bodyBytes, &geminiReq, model, isStream, userID, startTime, reqCtx, globalModelMapping)
 	} else {
-		handleSingleChannel(c, envCfg, cfgManager, channelScheduler, h.circuitLogStore, bodyBytes, &geminiReq, model, isStream, startTime, reqCtx)
+		handleSingleChannel(c, envCfg, cfgManager, channelScheduler, h.circuitLogStore, bodyBytes, &geminiReq, model, isStream, startTime, reqCtx, globalModelMapping)
 	}
 }
 
@@ -328,6 +329,7 @@ func handleMultiChannel(
 	userID string,
 	startTime time.Time,
 	reqCtx *requestLogContext,
+	globalModelMapping map[string]string,
 ) {
 	failedSlots := make(map[string]bool)
 	var lastError error
@@ -365,7 +367,7 @@ func handleMultiChannel(
 		success, successKey, _, failoverErr, usage := tryChannelWithAllKeys(
 			c, envCfg, cfgManager, channelScheduler, circuitLogStore, upstreamOneKey, channelIndex,
 			bodyBytes, geminiReq, model, isStream, startTime,
-			reqCtx,
+			reqCtx, globalModelMapping,
 		)
 
 		if success {
@@ -423,6 +425,7 @@ func tryChannelWithAllKeys(
 	isStream bool,
 	startTime time.Time,
 	reqCtx *requestLogContext,
+	globalModelMapping map[string]string,
 ) (bool, string, int, *common.FailoverError, *types.Usage) {
 	enabledKeys := upstream.GetEnabledAPIKeys()
 	if len(enabledKeys) == 0 {
@@ -487,7 +490,7 @@ func tryChannelWithAllKeys(
 			}
 
 			// 构建请求
-			providerReq, err := buildProviderRequest(c, upstream, currentBaseURL, apiKey, geminiReq, model, isStream)
+			providerReq, err := buildProviderRequest(c, upstream, currentBaseURL, apiKey, geminiReq, model, isStream, globalModelMapping)
 			if err != nil {
 				failedKeys[apiKey] = true
 				common.RecordFailureAndStoreLastFailureLog(circuitLogStore, metricsManager, "gemini", currentBaseURL, apiKey, 0, nil, err, func() {
@@ -598,6 +601,7 @@ func handleSingleChannel(
 	isStream bool,
 	startTime time.Time,
 	reqCtx *requestLogContext,
+	globalModelMapping map[string]string,
 ) {
 	upstream, err := cfgManager.GetCurrentGeminiUpstream()
 	if err != nil {
@@ -691,7 +695,7 @@ func handleSingleChannel(
 				log.Printf("[Gemini-Key] 使用API密钥: %s", utils.MaskAPIKey(apiKey))
 			}
 
-			providerReq, err := buildProviderRequest(c, upstream, currentBaseURL, apiKey, geminiReq, model, isStream)
+			providerReq, err := buildProviderRequest(c, upstream, currentBaseURL, apiKey, geminiReq, model, isStream, globalModelMapping)
 			if err != nil {
 				lastError = err
 				failedKeys[apiKey] = true
@@ -797,9 +801,10 @@ func buildProviderRequest(
 	geminiReq *types.GeminiRequest,
 	model string,
 	isStream bool,
+	globalModelMapping map[string]string,
 ) (*http.Request, error) {
 	// 应用模型映射
-	mappedModel := config.RedirectModel(model, upstream)
+	mappedModel := config.RedirectModelWithGlobal(model, upstream, globalModelMapping)
 
 	var requestBody []byte
 	var url string

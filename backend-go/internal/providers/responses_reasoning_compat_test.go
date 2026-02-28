@@ -49,3 +49,25 @@ func TestNormalizeResponsesReasoningEffort_OtherModelsUnchanged(t *testing.T) {
 		t.Fatalf("effort=%v, want %q", got, "minimal")
 	}
 }
+
+func TestRedirectResponsesReasoningEffort(t *testing.T) {
+	req := map[string]interface{}{
+		"reasoning": map[string]interface{}{
+			"effort": "low",
+		},
+		"reasoning_effort": "medium",
+	}
+
+	redirectResponsesReasoningEffort(req, map[string]string{
+		"low":    "xhigh",
+		"medium": "high",
+	})
+
+	reasoning := req["reasoning"].(map[string]interface{})
+	if got := reasoning["effort"]; got != "xhigh" {
+		t.Fatalf("reasoning.effort=%v, want %q", got, "xhigh")
+	}
+	if got := req["reasoning_effort"]; got != "high" {
+		t.Fatalf("reasoning_effort=%v, want %q", got, "high")
+	}
+}

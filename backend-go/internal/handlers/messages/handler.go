@@ -253,11 +253,12 @@ func (h *Handler) Handle(c *gin.Context) {
 
 	// 多槽位模式：(渠道,key) 同层级负载均衡，并按 user_id 做粘性
 	isMultiSlot := channelScheduler.IsMultiSlotMode(false)
+	globalModelMapping := cfgManager.GetGlobalModelMapping()
 
 	if isMultiSlot {
-		handleMultiChannel(c, envCfg, cfgManager, channelScheduler, h.circuitLogStore, bodyBytes, claudeReq, userID, startTime, billingHandler, billingCtx, reqCtx)
+		handleMultiChannel(c, envCfg, cfgManager, channelScheduler, h.circuitLogStore, bodyBytes, claudeReq, userID, startTime, billingHandler, billingCtx, reqCtx, globalModelMapping)
 	} else {
-		handleSingleChannel(c, envCfg, cfgManager, channelScheduler, h.circuitLogStore, bodyBytes, claudeReq, startTime, billingHandler, billingCtx, reqCtx)
+		handleSingleChannel(c, envCfg, cfgManager, channelScheduler, h.circuitLogStore, bodyBytes, claudeReq, startTime, billingHandler, billingCtx, reqCtx, globalModelMapping)
 	}
 }
 
@@ -275,6 +276,7 @@ func handleMultiChannel(
 	billingHandler *billing.Handler,
 	billingCtx *billing.RequestContext,
 	reqCtx *requestLogContext,
+	globalModelMapping map[string]string,
 ) {
 	failedSlots := make(map[string]bool)
 	var lastError error
@@ -299,7 +301,7 @@ func handleMultiChannel(
 		if reqCtx != nil {
 			reqCtx.channelIndex = channelIndex
 			reqCtx.channelName = upstream.Name
-			mappedModel := config.RedirectModel(claudeReq.Model, upstream)
+			mappedModel := config.RedirectModelWithGlobal(claudeReq.Model, upstream, globalModelMapping)
 			if mappedModel != claudeReq.Model {
 				reqCtx.model = fmt.Sprintf("%s -> %s", claudeReq.Model, mappedModel)
 			} else {
@@ -315,7 +317,7 @@ func handleMultiChannel(
 
 		upstreamOneKey := upstream.Clone()
 		upstreamOneKey.APIKeys = []string{selection.APIKey}
-		success, successKey, _, failoverErr := tryChannelWithAllKeys(c, envCfg, cfgManager, channelScheduler, circuitLogStore, upstreamOneKey, channelIndex, bodyBytes, claudeReq, startTime, billingHandler, billingCtx, reqCtx)
+		success, successKey, _, failoverErr := tryChannelWithAllKeys(c, envCfg, cfgManager, channelScheduler, circuitLogStore, upstreamOneKey, channelIndex, bodyBytes, claudeReq, startTime, billingHandler, billingCtx, reqCtx, globalModelMapping)
 
 		if success {
 			// successKey 为空表示请求方取消导致的提前退出：不记录成功/亲和，也不再继续。
@@ -364,6 +366,7 @@ func tryChannelWithAllKeys(
 	billingHandler *billing.Handler,
 	billingCtx *billing.RequestContext,
 	reqCtx *requestLogContext,
+	globalModelMapping map[string]string,
 ) (bool, string, int, *common.FailoverError) {
 	enabledKeys := upstream.GetEnabledAPIKeys()
 	if len(enabledKeys) == 0 {
@@ -436,7 +439,9 @@ func tryChannelWithAllKeys(
 			// 使用深拷贝避免并发修改问题
 			upstreamCopy := upstream.Clone()
 			upstreamCopy.BaseURL = currentBaseURL
-			mappedModel := config.RedirectModel(claudeReq.Model, upstreamCopy)
+			mappedModel := config.RedirectModelWithGlobal(claudeReq.Model, upstreamCopy, globalModelMapping)
+			// 固定为精确映射，避免 provider 侧再次模糊匹配改变优先级。
+			upstreamCopy.ModelMapping = map[string]string{claudeReq.Model: mappedModel}
 			if reqCtx != nil {
 				if mappedModel != claudeReq.Model {
 					reqCtx.model = fmt.Sprintf("%s -> %s", claudeReq.Model, mappedModel)
@@ -583,6 +588,7 @@ func handleSingleChannel(
 	billingHandler *billing.Handler,
 	billingCtx *billing.RequestContext,
 	reqCtx *requestLogContext,
+	globalModelMapping map[string]string,
 ) {
 	upstream, err := cfgManager.GetCurrentUpstream()
 	if err != nil {
@@ -629,7 +635,7 @@ func handleSingleChannel(
 	if reqCtx != nil {
 		reqCtx.channelIndex = 0
 		reqCtx.channelName = upstream.Name
-		mappedModel := config.RedirectModel(claudeReq.Model, upstream)
+		mappedModel := config.RedirectModelWithGlobal(claudeReq.Model, upstream, globalModelMapping)
 		if mappedModel != claudeReq.Model {
 			reqCtx.model = fmt.Sprintf("%s -> %s", claudeReq.Model, mappedModel)
 		} else {
@@ -694,7 +700,9 @@ func handleSingleChannel(
 			// 使用深拷贝避免并发修改问题
 			upstreamCopy := upstream.Clone()
 			upstreamCopy.BaseURL = currentBaseURL
-			mappedModel := config.RedirectModel(claudeReq.Model, upstreamCopy)
+			mappedModel := config.RedirectModelWithGlobal(claudeReq.Model, upstreamCopy, globalModelMapping)
+			// 固定为精确映射，避免 provider 侧再次模糊匹配改变优先级。
+			upstreamCopy.ModelMapping = map[string]string{claudeReq.Model: mappedModel}
 			if reqCtx != nil {
 				if mappedModel != claudeReq.Model {
 					reqCtx.model = fmt.Sprintf("%s -> %s", claudeReq.Model, mappedModel)

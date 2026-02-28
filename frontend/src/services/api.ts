@@ -129,6 +129,14 @@ export interface ChannelsResponse {
   loadBalance: string
 }
 
+export interface GlobalModelMappingSettings {
+  globalModelMapping: Record<string, string>
+}
+
+export interface GlobalReasoningMappingSettings {
+  globalReasoningMapping: Record<string, string>
+}
+
 // 渠道仪表盘响应（合并 channels + metrics + stats）
 export interface ChannelDashboardResponse {
   channels: Channel[]
@@ -830,6 +838,30 @@ class ApiService {
     await this.request('/settings/fuzzy-mode', {
       method: 'PUT',
       body: JSON.stringify({ enabled })
+    })
+  }
+
+  // ============== 全局重定向设置 API ==============
+
+  async getGlobalModelMapping(): Promise<GlobalModelMappingSettings> {
+    return this.request('/settings/model-mapping')
+  }
+
+  async setGlobalModelMapping(globalModelMapping: Record<string, string>): Promise<void> {
+    await this.request('/settings/model-mapping', {
+      method: 'PUT',
+      body: JSON.stringify({ globalModelMapping })
+    })
+  }
+
+  async getGlobalReasoningMapping(): Promise<GlobalReasoningMappingSettings> {
+    return this.request('/settings/reasoning-mapping')
+  }
+
+  async setGlobalReasoningMapping(globalReasoningMapping: Record<string, string>): Promise<void> {
+    await this.request('/settings/reasoning-mapping', {
+      method: 'PUT',
+      body: JSON.stringify({ globalReasoningMapping })
     })
   }
 

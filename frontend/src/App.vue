@@ -262,7 +262,7 @@
             <v-btn
               color="teal"
               size="large"
-              prepend-icon="mdi-brain"
+              prepend-icon="mdi-swap-horizontal"
               variant="tonal"
               :loading="globalReasoningMappingLoading || globalReasoningMappingSaving"
               :disabled="globalReasoningMappingLoading || globalReasoningMappingSaving"
@@ -357,7 +357,7 @@
       target-label="目标思考等级"
       source-placeholder="例如 low"
       target-placeholder="例如 xhigh"
-      icon="mdi-brain"
+      icon="mdi-swap-horizontal"
       :mappings="globalReasoningMapping"
       :loading="globalReasoningMappingLoading"
       :saving="globalReasoningMappingSaving"

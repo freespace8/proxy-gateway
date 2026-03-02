@@ -3,7 +3,6 @@
     <v-card>
       <v-card-title class="d-flex align-center justify-space-between">
         <div class="d-flex align-center ga-2">
-          <v-icon color="primary">mdi-text-box-search-outline</v-icon>
           <span class="text-subtitle-1">请求详情</span>
           <v-chip v-if="detail?.requestId" size="x-small" variant="tonal" class="font-mono">
             {{ detail.requestId }}
@@ -32,8 +31,13 @@
         </div>
 
         <div v-else-if="detail">
-          <div class="text-caption text-medium-emphasis mb-3">
-            {{ (detail.requestMethod || 'POST').toUpperCase() }} {{ detail.requestUrl || '--' }}
+          <div class="d-flex align-center ga-2 mb-3">
+            <span class="text-caption text-medium-emphasis">
+              {{ (detail.requestMethod || 'POST').toUpperCase() }} {{ detail.requestUrl || '--' }}
+            </span>
+            <v-chip size="x-small" :color="getStatusColor(detail.statusCode)" variant="tonal">
+              HTTP {{ detail.statusCode || '--' }}
+            </v-chip>
           </div>
 
           <v-row dense>
@@ -69,8 +73,32 @@
                 </v-btn>
               </div>
               <div class="code-container">
-                <JsonTreeView v-if="parsedBody.ok" :value="parsedBody.value" class="code-tree" />
+                <JsonTreeView v-if="parsedBody.ok" :value="parsedBody.value" :default-expand-depth="0" class="code-tree" />
                 <pre v-else class="code-pre">{{ bodyText || '无' }}</pre>
+              </div>
+            </v-col>
+
+            <v-col cols="12">
+              <div class="d-flex align-center justify-space-between mb-2">
+                <div class="d-flex align-center ga-2">
+                  <span class="text-subtitle-2">Response</span>
+                  <v-chip
+                    v-if="detail.responseBodyTruncated"
+                    size="x-small"
+                    color="warning"
+                    variant="tonal"
+                  >
+                    已截断
+                  </v-chip>
+                </div>
+                <v-btn size="x-small" variant="text" :disabled="!rawResponse" @click="copyResponse">
+                  <v-icon start size="small">{{ copiedResponse ? 'mdi-check' : 'mdi-content-copy' }}</v-icon>
+                  复制
+                </v-btn>
+              </div>
+              <div class="code-container">
+                <JsonTreeView v-if="parsedResponse.ok" :value="parsedResponse.value" :default-expand-depth="0" class="code-tree" />
+                <pre v-else class="code-pre">{{ responseText || '无' }}</pre>
               </div>
             </v-col>
 
@@ -115,7 +143,7 @@ let requestSeq = 0
 const copiedCurl = ref(false)
 const copiedHeaders = ref(false)
 const copiedBody = ref(false)
-
+const copiedResponse = ref(false)
 const headersObject = computed<Record<string, string>>(() => {
   const headers = detail.value?.requestHeaders || {}
   const keys = Object.keys(headers).sort((a, b) => a.localeCompare(b))
@@ -147,6 +175,29 @@ const bodyText = computed(() => {
   return rawBody.value
 })
 
+const rawResponse = computed(() => detail.value?.responseBody || '')
+
+const parsedResponse = computed<{ ok: true; value: unknown } | { ok: false; value: null }>(() => {
+  if (!rawResponse.value) return { ok: false, value: null }
+  try {
+    return { ok: true, value: JSON.parse(rawResponse.value) as unknown }
+  } catch {
+    return { ok: false, value: null }
+  }
+})
+
+const responseText = computed(() => {
+  if (!rawResponse.value) return ''
+  if (parsedResponse.value.ok) return JSON.stringify(parsedResponse.value.value, null, 2)
+  return rawResponse.value
+})
+
+function getStatusColor(statusCode: number) {
+  if (statusCode >= 200 && statusCode < 300) return 'success'
+  if (statusCode >= 400 && statusCode < 500) return 'warning'
+  if (statusCode >= 500) return 'error'
+  return 'grey'
+}
 function shellQuote(value: string): string {
   if (value === '') return "''"
   return `'${value.replace(/'/g, `'\"'\"'`)}'`
@@ -234,11 +285,13 @@ watch(
   }
 )
 
+
 watch(open, v => {
   if (!v) {
     copiedCurl.value = false
     copiedHeaders.value = false
     copiedBody.value = false
+    copiedResponse.value = false
   }
 })
 
@@ -254,6 +307,8 @@ async function copyText(text: string, flag: { value: boolean }) {
 const copyCurl = () => copyText(curlCommand.value, copiedCurl)
 const copyHeaders = () => copyText(headersText.value, copiedHeaders)
 const copyBody = () => copyText(rawBody.value, copiedBody)
+const copyResponse = () => copyText(rawResponse.value, copiedResponse)
+
 </script>
 
 <style scoped>

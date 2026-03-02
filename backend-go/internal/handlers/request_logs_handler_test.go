@@ -125,22 +125,24 @@ func TestRequestLogsHandler_GetLogDetail(t *testing.T) {
 
 	store := metrics.NewMemoryRequestLogStore(200)
 	if err := store.AddRequestLog(metrics.RequestLogRecord{
-		ID:                   123,
-		RequestID:            "req_123",
-		RequestMethod:        http.MethodPost,
-		RequestURL:           "/v1/messages",
-		RequestHeaders:       map[string]string{"Content-Type": "application/json"},
-		RequestBody:          `{"a":1}`,
-		RequestBodyTruncated: false,
-		ChannelIndex:         0,
-		ChannelName:          "c0",
-		KeyMask:              "***",
-		Timestamp:            time.Now(),
-		DurationMs:           10,
-		StatusCode:           200,
-		Success:              true,
-		Model:                "m",
-		APIType:              "messages",
+		ID:                    123,
+		RequestID:             "req_123",
+		RequestMethod:         http.MethodPost,
+		RequestURL:            "/v1/messages",
+		RequestHeaders:        map[string]string{"Content-Type": "application/json"},
+		RequestBody:           `{"a":1}`,
+		RequestBodyTruncated:  false,
+		ResponseBody:          `{"ok":true}`,
+		ResponseBodyTruncated: false,
+		ChannelIndex:          0,
+		ChannelName:           "c0",
+		KeyMask:               "***",
+		Timestamp:             time.Now(),
+		DurationMs:            10,
+		StatusCode:            200,
+		Success:               true,
+		Model:                 "m",
+		APIType:               "messages",
 	}); err != nil {
 		t.Fatalf("AddRequestLog: %v", err)
 	}
@@ -165,6 +167,9 @@ func TestRequestLogsHandler_GetLogDetail(t *testing.T) {
 		}
 		if resp.Log.RequestID != "req_123" || resp.Log.RequestURL != "/v1/messages" || resp.Log.RequestBody == "" {
 			t.Fatalf("unexpected log: %+v", resp.Log)
+		}
+		if resp.Log.ResponseBody != `{"ok":true}` {
+			t.Fatalf("response body=%q", resp.Log.ResponseBody)
 		}
 	}
 

@@ -7,7 +7,10 @@ import (
 	"time"
 )
 
-const unknownKeyID = "unknown"
+const (
+	unknownKeyID             = "unknown"
+	maxRequestLogsPerAPIType = 20
+)
 
 type requestLogKey struct {
 	apiType      string
@@ -26,28 +29,26 @@ type requestLogCounter struct {
 	resetAt  time.Time
 }
 
-// MemoryRequestLogStore 在内存中保存最近 N 条请求日志（环形缓冲）。
-// 用途：用于管理端查看近期日志（内存环形缓冲）。
+// MemoryRequestLogStore 在内存中保存每个 apiType 最近 N 条请求日志。
+// 用途：用于管理端查看近期日志。
 type MemoryRequestLogStore struct {
 	mu       sync.RWMutex
 	capacity int
 
-	buf    []RequestLogRecord
-	start  int
-	size   int
-	nextID int64
+	logsByAPIType map[string][]RequestLogRecord
+	nextID        int64
 
 	counters       map[requestLogKey]*requestLogCounter
 	channelResetAt map[requestLogChannelKey]time.Time
 }
 
 func NewMemoryRequestLogStore(capacity int) *MemoryRequestLogStore {
-	if capacity <= 0 {
-		capacity = 500
+	if capacity <= 0 || capacity > maxRequestLogsPerAPIType {
+		capacity = maxRequestLogsPerAPIType
 	}
 	return &MemoryRequestLogStore{
 		capacity:       capacity,
-		buf:            make([]RequestLogRecord, capacity),
+		logsByAPIType:  make(map[string][]RequestLogRecord),
 		counters:       make(map[requestLogKey]*requestLogCounter),
 		channelResetAt: make(map[requestLogChannelKey]time.Time),
 	}
@@ -95,7 +96,7 @@ func (s *MemoryRequestLogStore) AddRequestLog(logRecord RequestLogRecord) error 
 		logRecord.ID = s.nextID
 	}
 
-	// 记录累计计数（口径：每写入一条请求日志即 +1；不随环形缓冲覆盖而减少）。
+	// 记录累计计数（口径：每写入一条请求日志即 +1；不随日志容量裁剪而减少）。
 	normalizedKeyID := normalizeKeyID(logRecord.KeyID)
 	counterKey := requestLogKey{
 		apiType:      logRecord.APIType,
@@ -105,13 +106,12 @@ func (s *MemoryRequestLogStore) AddRequestLog(logRecord RequestLogRecord) error 
 	counter := s.getOrCreateCounterLocked(counterKey)
 	counter.total++
 
-	idx := (s.start + s.size) % s.capacity
-	s.buf[idx] = logRecord
-	if s.size < s.capacity {
-		s.size++
-	} else {
-		s.start = (s.start + 1) % s.capacity
+	logs := s.logsByAPIType[logRecord.APIType]
+	logs = append(logs, logRecord)
+	if len(logs) > s.capacity {
+		logs = logs[len(logs)-s.capacity:]
 	}
+	s.logsByAPIType[logRecord.APIType] = logs
 	return nil
 }
 
@@ -155,17 +155,14 @@ func (s *MemoryRequestLogStore) QueryRequestLogs(apiType string, limit, offset i
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	// 拷贝并按 apiType 过滤
-	filtered := make([]RequestLogRecord, 0, s.size)
-	for i := 0; i < s.size; i++ {
-		idx := (s.start + i) % s.capacity
-		rec := s.buf[idx]
-		if rec.APIType == apiType {
-			if s.shouldFilterRecordLocked(rec) {
-				continue
-			}
-			filtered = append(filtered, rec)
+	// 拷贝并按 reset 规则过滤
+	records := s.logsByAPIType[apiType]
+	filtered := make([]RequestLogRecord, 0, len(records))
+	for _, rec := range records {
+		if s.shouldFilterRecordLocked(rec) {
+			continue
 		}
+		filtered = append(filtered, rec)
 	}
 
 	// 按 timestamp 倒序（最新在前）
@@ -194,10 +191,10 @@ func (s *MemoryRequestLogStore) GetRequestLogDetail(apiType string, id int64) (*
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	for i := 0; i < s.size; i++ {
-		idx := (s.start + i) % s.capacity
-		rec := s.buf[idx]
-		if rec.APIType != apiType || rec.ID != id {
+	records := s.logsByAPIType[apiType]
+	for i := range records {
+		rec := records[i]
+		if rec.ID != id {
 			continue
 		}
 		if s.shouldFilterRecordLocked(rec) {
@@ -253,7 +250,7 @@ func (s *MemoryRequestLogStore) GetTotalRequestCount(apiType string) int64 {
 	return sum
 }
 
-// ResetKey 清空单个 Key 的累计计数与可查询日志（不影响环形缓冲内存占用）。
+// ResetKey 清空单个 Key 的累计计数与可查询日志（不影响日志存储容量）。
 func (s *MemoryRequestLogStore) ResetKey(apiType string, channelIndex int, keyID string) {
 	if s == nil {
 		return
@@ -269,7 +266,7 @@ func (s *MemoryRequestLogStore) ResetKey(apiType string, channelIndex int, keyID
 	c.resetAt = now
 }
 
-// ResetChannel 清空单个渠道的累计计数与可查询日志（不影响环形缓冲内存占用）。
+// ResetChannel 清空单个渠道的累计计数与可查询日志（不影响日志存储容量）。
 func (s *MemoryRequestLogStore) ResetChannel(apiType string, channelIndex int) {
 	if s == nil {
 		return

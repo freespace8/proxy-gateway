@@ -314,6 +314,8 @@ export interface RequestLogRecord {
   requestHeaders?: Record<string, string>
   requestBody?: string
   requestBodyTruncated?: boolean
+  responseBody?: string
+  responseBodyTruncated?: boolean
   channelIndex: number
   channelName: string
   keyMask: string

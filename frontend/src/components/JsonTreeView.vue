@@ -10,7 +10,7 @@
         <div v-for="([key, child], index) in entries" :key="key" class="json-row">
           <span v-if="!isArrayValue" class="json-key">{{ formatKey(key) }}</span>
           <span v-if="!isArrayValue" class="json-separator">: </span>
-          <JsonTreeView :value="child" :level="level + 1" />
+          <JsonTreeView :value="child" :level="level + 1" :default-expand-depth="props.defaultExpandDepth" />
           <span v-if="index < entries.length - 1" class="json-comma">,</span>
         </div>
       </div>
@@ -28,8 +28,10 @@ defineOptions({ name: 'JsonTreeView' })
 const props = withDefaults(defineProps<{
   value: unknown
   level?: number
+  defaultExpandDepth?: number
 }>(), {
-  level: 0
+  level: 0,
+  defaultExpandDepth: Number.POSITIVE_INFINITY
 })
 
 const level = computed(() => props.level ?? 0)
@@ -38,7 +40,7 @@ const isObjectValue = computed(
   () => props.value !== null && typeof props.value === 'object' && !Array.isArray(props.value)
 )
 const isCollapsible = computed(() => isArrayValue.value || isObjectValue.value)
-const defaultOpen = computed(() => level.value >= 0)
+const defaultOpen = computed(() => level.value < props.defaultExpandDepth)
 
 const entries = computed<Array<[string, unknown]>>(() => {
   if (Array.isArray(props.value)) {

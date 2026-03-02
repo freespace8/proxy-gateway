@@ -98,6 +98,9 @@ func TestGeminiHandler_WritesRequestLog_NonStream(t *testing.T) {
 	if !strings.Contains(logs[0].RequestBody, `"contents":[`) {
 		t.Fatalf("request body=%q", logs[0].RequestBody)
 	}
+	if !strings.Contains(logs[0].ResponseBody, `"candidates"`) {
+		t.Fatalf("response body=%q", logs[0].ResponseBody)
+	}
 
 	if live.Count() != 0 {
 		t.Fatalf("live requests not cleaned up, count=%d", live.Count())
@@ -172,6 +175,9 @@ func TestGeminiHandler_WritesRequestLog_Stream(t *testing.T) {
 	}
 	if logs[0].StatusCode != http.StatusOK || !logs[0].Success {
 		t.Fatalf("unexpected log status=%d success=%v err=%q", logs[0].StatusCode, logs[0].Success, logs[0].ErrorMessage)
+	}
+	if !strings.Contains(logs[0].ResponseBody, `data:`) {
+		t.Fatalf("stream response body=%q", logs[0].ResponseBody)
 	}
 
 	if live.Count() != 0 {

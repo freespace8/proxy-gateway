@@ -103,8 +103,8 @@ func main() {
 	// 实时请求监控
 	liveRequestManager := monitor.NewLiveRequestManager(50)
 
-	// 请求日志存储：固定使用内存环形缓冲（最近 N 条）。
-	requestLogStore := metrics.NewMemoryRequestLogStore(envCfg.RequestLogsMemoryMaxSize)
+	// 请求日志存储：每个类型仅保留最近 20 条（messages/responses/gemini）。
+	requestLogStore := metrics.NewMemoryRequestLogStore(20)
 
 	// 初始化计费相关组件
 	var billingClient *billing.Client

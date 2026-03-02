@@ -49,15 +49,16 @@ func (h *RequestLogsHandler) GetLogs(c *gin.Context) {
 		return
 	}
 
-	// 列表接口仅返回概要信息，避免传输/渲染大字段（请求头/Body/cURL 由详情接口获取）。
+	// 列表接口仅返回概要信息，避免传输/渲染大字段（请求/响应详情由详情接口获取）。
 	for i := range logs {
 		logs[i].RequestMethod = ""
 		logs[i].RequestURL = ""
 		logs[i].RequestHeaders = nil
 		logs[i].RequestBody = ""
 		logs[i].RequestBodyTruncated = false
+		logs[i].ResponseBody = ""
+		logs[i].ResponseBodyTruncated = false
 	}
-
 	var totalRequests int64
 	if stats, ok := h.store.(metrics.RequestLogStatsProvider); ok && stats != nil {
 		totalRequests = stats.GetTotalRequestCount(apiType)

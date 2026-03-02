@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"fmt"
 	"testing"
 	"time"
 )
@@ -110,5 +111,51 @@ func TestMemoryRequestLogStore_RequestCountAndReset(t *testing.T) {
 	store.ResetChannel("messages", 0)
 	if got := store.GetTotalRequestCount("messages"); got != 0 {
 		t.Fatalf("GetTotalRequestCount(after channel reset)=%d, want %d", got, 0)
+	}
+}
+
+func TestMemoryRequestLogStore_PerAPITypeLimit(t *testing.T) {
+	store := NewMemoryRequestLogStore(200)
+	base := time.Now().Add(-time.Minute).UTC()
+
+	for i := 1; i <= 25; i++ {
+		if err := store.AddRequestLog(RequestLogRecord{
+			RequestID:  fmt.Sprintf("m%d", i),
+			APIType:    "messages",
+			Timestamp:  base.Add(time.Duration(i) * time.Second),
+			StatusCode: 200,
+		}); err != nil {
+			t.Fatalf("AddRequestLog(messages-%d) err=%v", i, err)
+		}
+		if err := store.AddRequestLog(RequestLogRecord{
+			RequestID:  fmt.Sprintf("g%d", i),
+			APIType:    "gemini",
+			Timestamp:  base.Add(time.Duration(i) * time.Second),
+			StatusCode: 200,
+		}); err != nil {
+			t.Fatalf("AddRequestLog(gemini-%d) err=%v", i, err)
+		}
+	}
+
+	messagesLogs, messagesTotal, err := store.QueryRequestLogs("messages", 50, 0)
+	if err != nil {
+		t.Fatalf("QueryRequestLogs(messages) err=%v", err)
+	}
+	if messagesTotal != 20 || len(messagesLogs) != 20 {
+		t.Fatalf("messages total/len=%d/%d, want 20/20", messagesTotal, len(messagesLogs))
+	}
+	if messagesLogs[0].RequestID != "m25" || messagesLogs[19].RequestID != "m6" {
+		t.Fatalf("messages range=%s..%s, want m25..m6", messagesLogs[0].RequestID, messagesLogs[19].RequestID)
+	}
+
+	geminiLogs, geminiTotal, err := store.QueryRequestLogs("gemini", 50, 0)
+	if err != nil {
+		t.Fatalf("QueryRequestLogs(gemini) err=%v", err)
+	}
+	if geminiTotal != 20 || len(geminiLogs) != 20 {
+		t.Fatalf("gemini total/len=%d/%d, want 20/20", geminiTotal, len(geminiLogs))
+	}
+	if geminiLogs[0].RequestID != "g25" || geminiLogs[19].RequestID != "g6" {
+		t.Fatalf("gemini range=%s..%s, want g25..g6", geminiLogs[0].RequestID, geminiLogs[19].RequestID)
 	}
 }

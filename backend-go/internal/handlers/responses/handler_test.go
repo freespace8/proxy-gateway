@@ -154,6 +154,12 @@ func TestResponsesHandler_SingleChannel_Success(t *testing.T) {
 	if !strings.Contains(logs[0].RequestBody, `"model":"gpt-4o"`) {
 		t.Fatalf("request body=%q", logs[0].RequestBody)
 	}
+	if !strings.Contains(logs[0].ResponseBody, `"id":"resp_1"`) {
+		t.Fatalf("response body=%q", logs[0].ResponseBody)
+	}
+	if logs[0].ResponseBodyTruncated {
+		t.Fatalf("response body should not be truncated")
+	}
 }
 
 func TestResponsesHandler_OpenAI_NonStream_DoesNotDoubleCreateSession(t *testing.T) {

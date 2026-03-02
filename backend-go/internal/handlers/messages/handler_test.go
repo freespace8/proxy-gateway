@@ -188,6 +188,12 @@ func TestMessagesHandler_SingleChannel_FailoverKeyThenSuccess(t *testing.T) {
 	if logs[0].RequestBody != reqBody {
 		t.Fatalf("request body=%q", logs[0].RequestBody)
 	}
+	if !strings.Contains(logs[0].ResponseBody, `"id":"msg_1"`) {
+		t.Fatalf("response body=%q", logs[0].ResponseBody)
+	}
+	if logs[0].ResponseBodyTruncated {
+		t.Fatalf("response body should not be truncated")
+	}
 }
 
 func TestMessagesHandler_MultiChannel_FailoverToNextChannel(t *testing.T) {

@@ -166,6 +166,7 @@ func (h *Handler) Handle(c *gin.Context) {
 	requestID := uuid.New().String()
 
 	reqSnapshot := common.CaptureRequestSnapshot(c, nil)
+	responseSnapshotWriter := common.CaptureResponseSnapshot(c)
 
 	reqCtx := &requestLogContext{
 		requestID:          requestID,
@@ -184,7 +185,14 @@ func (h *Handler) Handle(c *gin.Context) {
 			return
 		}
 
-		statusCode := c.Writer.Status()
+		responseSnapshot := common.ResponseSnapshot{}
+		if responseSnapshotWriter != nil {
+			responseSnapshot = responseSnapshotWriter.Snapshot()
+		}
+		statusCode := responseSnapshot.StatusCode
+		if statusCode <= 0 {
+			statusCode = c.Writer.Status()
+		}
 		success := reqCtx.success
 		if !success && statusCode >= 200 && statusCode < 300 && reqCtx.errorMsg == "" {
 			success = true
@@ -207,29 +215,31 @@ func (h *Handler) Handle(c *gin.Context) {
 		finalSnapshot := common.ResolveRequestSnapshot(c, reqSnapshot)
 
 		if err := h.requestLogStore.AddRequestLog(metrics.RequestLogRecord{
-			RequestID:            requestID,
-			RequestMethod:        finalSnapshot.Method,
-			RequestURL:           finalSnapshot.URL,
-			RequestHeaders:       finalSnapshot.Headers,
-			RequestBody:          finalSnapshot.Body,
-			RequestBodyTruncated: finalSnapshot.BodyTruncated,
-			ChannelIndex:         reqCtx.channelIndex,
-			ChannelName:          reqCtx.channelName,
-			KeyMask:              utils.MaskAPIKey(reqCtx.apiKey),
-			KeyID:                keyID,
-			Timestamp:            startTime,
-			DurationMs:           time.Since(startTime).Milliseconds(),
-			StatusCode:           statusCode,
-			Success:              success,
-			Model:                reqCtx.model,
-			ReasoningEffort:      reqCtx.reasoningEffort,
-			InputTokens:          int64(usage.InputTokens),
-			OutputTokens:         int64(usage.OutputTokens),
-			CacheCreationTokens:  int64(usage.CacheCreationInputTokens),
-			CacheReadTokens:      int64(usage.CacheReadInputTokens),
-			CostCents:            reqCtx.costCents,
-			ErrorMessage:         truncateErrorMessage(errorMsg),
-			APIType:              "responses",
+			RequestID:             requestID,
+			RequestMethod:         finalSnapshot.Method,
+			RequestURL:            finalSnapshot.URL,
+			RequestHeaders:        finalSnapshot.Headers,
+			RequestBody:           finalSnapshot.Body,
+			RequestBodyTruncated:  finalSnapshot.BodyTruncated,
+			ResponseBody:          responseSnapshot.Body,
+			ResponseBodyTruncated: responseSnapshot.BodyTruncated,
+			ChannelIndex:          reqCtx.channelIndex,
+			ChannelName:           reqCtx.channelName,
+			KeyMask:               utils.MaskAPIKey(reqCtx.apiKey),
+			KeyID:                 keyID,
+			Timestamp:             startTime,
+			DurationMs:            time.Since(startTime).Milliseconds(),
+			StatusCode:            statusCode,
+			Success:               success,
+			Model:                 reqCtx.model,
+			ReasoningEffort:       reqCtx.reasoningEffort,
+			InputTokens:           int64(usage.InputTokens),
+			OutputTokens:          int64(usage.OutputTokens),
+			CacheCreationTokens:   int64(usage.CacheCreationInputTokens),
+			CacheReadTokens:       int64(usage.CacheReadInputTokens),
+			CostCents:             reqCtx.costCents,
+			ErrorMessage:          truncateErrorMessage(errorMsg),
+			APIType:               "responses",
 		}); err != nil {
 			log.Printf("[Responses-RequestLog] 警告: AddRequestLog 失败: %v", err)
 		}

@@ -62,6 +62,47 @@ func TestRestoreRequestBody(t *testing.T) {
 	}
 }
 
+func TestCaptureResponseSnapshot_JSON(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	writer := CaptureResponseSnapshot(c)
+	c.JSON(http.StatusCreated, gin.H{"ok": true})
+	snap := writer.Snapshot()
+
+	if snap.StatusCode != http.StatusCreated {
+		t.Fatalf("status=%d", snap.StatusCode)
+	}
+	if !strings.Contains(snap.Body, `"ok":true`) {
+		t.Fatalf("body=%q", snap.Body)
+	}
+	if snap.BodyTruncated {
+		t.Fatalf("body should not be truncated")
+	}
+}
+
+func TestCaptureResponseSnapshot_Truncated(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	writer := CaptureResponseSnapshot(c)
+	body := strings.Repeat("a", requestSnapshotMaxBodyBytes+10)
+	c.String(http.StatusOK, body)
+	snap := writer.Snapshot()
+
+	if snap.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d", snap.StatusCode)
+	}
+	if !snap.BodyTruncated {
+		t.Fatalf("expected body truncated")
+	}
+	if len(snap.Body) != requestSnapshotMaxBodyBytes {
+		t.Fatalf("body len=%d", len(snap.Body))
+	}
+}
+
 func TestSendRequest_StandardAndStream(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

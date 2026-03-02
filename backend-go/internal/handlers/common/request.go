@@ -161,6 +161,73 @@ type RequestSnapshot struct {
 	BodyTruncated bool
 }
 
+type ResponseSnapshot struct {
+	StatusCode    int
+	Body          string
+	BodyTruncated bool
+}
+
+type responseSnapshotWriter struct {
+	gin.ResponseWriter
+	maxBodyBytes  int
+	body          bytes.Buffer
+	bodyTruncated bool
+}
+
+func CaptureResponseSnapshot(c *gin.Context) *responseSnapshotWriter {
+	if c == nil || c.Writer == nil {
+		return nil
+	}
+	w := &responseSnapshotWriter{
+		ResponseWriter: c.Writer,
+		maxBodyBytes:   requestSnapshotMaxBodyBytes,
+	}
+	c.Writer = w
+	return w
+}
+
+func (w *responseSnapshotWriter) Write(data []byte) (int, error) {
+	w.capture(data)
+	return w.ResponseWriter.Write(data)
+}
+
+func (w *responseSnapshotWriter) WriteString(s string) (int, error) {
+	w.capture([]byte(s))
+	return w.ResponseWriter.WriteString(s)
+}
+
+func (w *responseSnapshotWriter) Snapshot() ResponseSnapshot {
+	if w == nil {
+		return ResponseSnapshot{}
+	}
+	statusCode := w.Status()
+	if statusCode <= 0 {
+		statusCode = http.StatusOK
+	}
+	return ResponseSnapshot{
+		StatusCode:    statusCode,
+		Body:          w.body.String(),
+		BodyTruncated: w.bodyTruncated,
+	}
+}
+
+func (w *responseSnapshotWriter) capture(data []byte) {
+	if w == nil || len(data) == 0 || w.maxBodyBytes <= 0 {
+		return
+	}
+	remaining := w.maxBodyBytes - w.body.Len()
+	if remaining <= 0 {
+		w.bodyTruncated = true
+		return
+	}
+	if len(data) > remaining {
+		_, _ = w.body.Write(data[:remaining])
+		w.bodyTruncated = true
+		return
+	}
+	_, _ = w.body.Write(data)
+}
+
 // CaptureRequestSnapshot 提取“请求详情”所需信息（请求头/Body/URL），用于管理端排障。
 //
 // 注意：为保证可复现 cURL，请求头保留原值；Body 会按固定上限截断（避免内存膨胀）。

@@ -238,3 +238,5 @@ docs/claude-code-investigation-*.md
 helloagents/history
 helloagents/plan
 .pi/superpowers-state.json
+.pi/side-agents/runtime
+.pi/side-agents/registry.json
